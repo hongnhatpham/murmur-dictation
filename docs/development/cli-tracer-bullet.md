@@ -15,8 +15,8 @@ Pipeline: `pw-record` → free/local STT → light cleanup/action parsing → `w
 
 - `pw-record` from PipeWire tools, for recording the default microphone.
 - `timeout` from GNU coreutils, used to stop the first fixed-duration recording.
-- `wl-copy` from `wl-clipboard`, for Wayland clipboard output.
-- Optional: `wtype` or `ydotool`, for paste/Enter simulation.
+- `wl-copy` and `wl-paste` from `wl-clipboard`, for Wayland clipboard input/output.
+- Optional: `wtype` or `ydotool`, for paste/Enter simulation and opt-in selection copy.
 - One local/free STT backend:
   - `faster-whisper` Python package, or
   - `whisper.cpp` executable plus a local ggml model file.
@@ -56,6 +56,18 @@ murmur doctor
 murmur dictate --duration 5
 ```
 
+## Hold-to-talk command pair
+
+For compositors that support separate press/release bindings, use the session commands instead of a fixed duration:
+
+```bash
+murmur start-recording --paste   # key press
+murmur stop-recording            # key release; processes and inserts
+murmur cancel-recording          # optional cancel binding
+```
+
+Only one session can be active at a time. Murmur uses a non-blocking lock file plus `~/.local/state/murmur/recording-session.json` to prevent overlapping recording/processing runs. If a command crashes, check that no `pw-record` or `murmur stop-recording` process is active before deleting a stale session or lock file.
+
 ## Copy vs paste
 
 Copy-only is safest:
@@ -71,6 +83,36 @@ murmur dictate --duration 5 --paste
 ```
 
 If no paste simulator is available, Murmur keeps the final text on the clipboard and records `copied-only`/fallback status.
+
+## Held recording command pair
+
+For release-aware hotkey helpers, use the command pair instead of fixed `--duration` recording:
+
+```bash
+murmur start-recording --paste
+murmur stop-recording
+murmur cancel-recording
+```
+
+`start-recording` refuses overlapping sessions. `stop-recording` runs the same transcription, transform, insertion, notification, and history path as `dictate`. `cancel-recording` aborts without insertion and deletes the captured audio.
+
+## Selected-text command prototype
+
+`murmur command` records a short spoken instruction and applies only conservative local transforms to selected or clipboard text. Supported transforms are currently `uppercase`, `lowercase`, and `concise`.
+
+Safer clipboard-only flow:
+
+```bash
+murmur command --clipboard --instruction make this uppercase
+```
+
+Opt-in selected-text flow:
+
+```bash
+murmur command --selection --duration 3
+```
+
+With `--selection`, Murmur sends Ctrl+C through `wtype`/`ydotool`, reads the clipboard with `wl-paste`, records/transcribes the command, copies the transformed text, and tries to paste it back over the selection. If copy/paste simulation is unavailable, it falls back to the existing clipboard or leaves the transformed text copied. Unsupported commands are not guessed; Murmur prints a message and preserves the original text.
 
 ## History and privacy
 

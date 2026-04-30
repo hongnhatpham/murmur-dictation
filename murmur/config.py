@@ -36,12 +36,17 @@ def default_config_path() -> Path:
 class PathsConfig:
     state_dir: Path = field(default_factory=state_dir)
     history_db: Path | None = None
+    personal_db: Path | None = None
     model_dir: Path = field(default_factory=lambda: cache_dir() / "models")
     debug_audio_dir: Path = field(default_factory=lambda: cache_dir() / "audio")
 
     @property
     def history_path(self) -> Path:
         return self.history_db or (self.state_dir / "history.sqlite3")
+
+    @property
+    def personal_path(self) -> Path:
+        return self.personal_db or (self.state_dir / "personal.sqlite3")
 
 
 @dataclass(frozen=True)
@@ -95,6 +100,7 @@ def _merge_paths(data: dict[str, Any]) -> PathsConfig:
     return PathsConfig(
         state_dir=_path(data.get("state_dir")) or defaults.state_dir,
         history_db=_path(data.get("history_db")),
+        personal_db=_path(data.get("personal_db")),
         model_dir=_path(data.get("model_dir")) or defaults.model_dir,
         debug_audio_dir=_path(data.get("debug_audio_dir")) or defaults.debug_audio_dir,
     )
@@ -156,6 +162,7 @@ def load_config(path: str | Path | None = None) -> MurmurConfig:
 def ensure_local_dirs(config: MurmurConfig) -> None:
     config.paths.state_dir.mkdir(parents=True, exist_ok=True)
     config.paths.history_path.parent.mkdir(parents=True, exist_ok=True)
+    config.paths.personal_path.parent.mkdir(parents=True, exist_ok=True)
     config.paths.model_dir.mkdir(parents=True, exist_ok=True)
     if config.privacy.keep_debug_audio:
         config.paths.debug_audio_dir.mkdir(parents=True, exist_ok=True)
@@ -168,6 +175,7 @@ def sample_config() -> str:
 [paths]
 # state_dir = "{defaults.paths.state_dir}"
 # history_db = "{defaults.paths.history_path}"
+# personal_db = "{defaults.paths.personal_path}"
 # model_dir = "{defaults.paths.model_dir}"
 # debug_audio_dir = "{defaults.paths.debug_audio_dir}"
 

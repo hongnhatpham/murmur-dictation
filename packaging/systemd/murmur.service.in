@@ -19,7 +19,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=%h/.local/share/murmur %h/.cache/murmur %h/.config/murmur
+ReadWritePaths=%h/.local/state/murmur %h/.local/share/murmur %h/.cache/murmur %h/.config/murmur
 
 [Install]
 WantedBy=default.target

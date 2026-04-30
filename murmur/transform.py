@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
+
+from .personal import apply_dictionary_terms, apply_snippets
 
 PRESS_ENTER_AFTER_INSERT = "press_enter_after_insert"
 
@@ -53,7 +56,13 @@ def clean_text(text: str, mode: str = "clean") -> str:
     return cleaned
 
 
-def transform_transcript(transcript: str, mode: str = "clean", press_enter_phrase: bool = True) -> TransformResult:
+def transform_transcript(
+    transcript: str,
+    mode: str = "clean",
+    press_enter_phrase: bool = True,
+    dictionary_terms: Iterable[str] | None = None,
+    snippets: Mapping[str, str] | None = None,
+) -> TransformResult:
     actions: list[TransformAction] = []
     working = transcript.strip()
 
@@ -63,4 +72,8 @@ def transform_transcript(transcript: str, mode: str = "clean", press_enter_phras
             actions.append(TransformAction(PRESS_ENTER_AFTER_INSERT))
 
     final_text = clean_text(transcript if mode == "raw" else working, mode=mode)
+    if snippets:
+        final_text = apply_snippets(final_text, snippets)
+    if dictionary_terms:
+        final_text = apply_dictionary_terms(final_text, dictionary_terms)
     return TransformResult(final_text=final_text, actions=actions)

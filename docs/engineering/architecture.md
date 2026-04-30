@@ -26,17 +26,9 @@ Long-running background process responsible for:
 - writing history;
 - exposing local status events to the overlay.
 
-Preferred long-term language: Rust.
+Current MVP decision: continue the Python prototype through the next daily-driver slices, then revisit a Rust daemon after hotkey, insertion, and latency risks are measured. See [`adr/0001-continue-python-through-mvp.md`](adr/0001-continue-python-through-mvp.md).
 
-Reasoning:
-
-- good system integration;
-- safe long-running daemon;
-- strong process management;
-- suitable for Wayland/Linux integration;
-- easy to package later.
-
-Prototype can be Python if faster for validating STT and audio.
+Rust remains the likely long-term daemon candidate because it offers strong system integration, safe long-running process behavior, Wayland/Linux suitability, and packaging advantages. The rewrite is intentionally deferred until the prototype identifies which daemon responsibilities need native implementation.
 
 ### 2. Audio capture
 

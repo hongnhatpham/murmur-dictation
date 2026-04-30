@@ -18,7 +18,7 @@ Install the equivalent packages for your distro:
 - `pw-record` from PipeWire tools, for microphone capture;
 - `wl-copy` from `wl-clipboard`, for clipboard output;
 - `wtype` for Wayland paste/Enter simulation;
-- `notify-send` from libnotify, optional status notifications.
+- `notify-send` from libnotify, optional focus-safe status notifications.
 
 ## Initialize config
 
@@ -36,7 +36,7 @@ Default config path:
 Default state paths:
 
 ```txt
-~/.local/share/murmur/murmur.sqlite3
+~/.local/state/murmur/history.sqlite3
 ~/.cache/murmur/audio/
 ```
 
@@ -60,6 +60,14 @@ Use an existing audio file instead of recording:
 murmur dictate --audio sample.wav
 ```
 
+Compositor-friendly press/release recording uses command pairs:
+
+```bash
+murmur start-recording --paste
+murmur stop-recording
+murmur cancel-recording
+```
+
 ## History and recovery
 
 ```bash
@@ -72,4 +80,4 @@ murmur last-transcript
 
 The default STT provider is `faster-whisper` with `base.en`. The first run may download the model through the normal Hugging Face/faster-whisper cache path. Do not commit model files to the repo.
 
-If `faster-whisper` is too slow or too large, test `tiny.en`, `base.en`, and `small.en`, then document the winner in an ADR.
+If `faster-whisper` is too slow or too large, test `tiny.en`, `base.en`, and `small.en`, then update the local STT ADR with the winner.

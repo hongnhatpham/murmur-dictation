@@ -8,14 +8,14 @@ murmur dictate --duration 5 --paste
 
 Bind that to a compositor shortcut for early testing.
 
-True hold-to-talk requires press/release semantics. If the compositor binding layer can call separate commands on key press and release, the planned shape is:
+True hold-to-talk requires press/release semantics. If the compositor binding layer can call separate commands on key press and release, bind this pair:
 
 ```bash
-murmur start-recording
-murmur stop-recording --paste
+murmur start-recording --paste
+murmur stop-recording
 ```
 
-Those commands are not implemented yet. Until then, use fixed-duration one-shot dictation or a shell wrapper.
+`start-recording` launches a tracked `pw-record` subprocess and writes a local session file under `~/.local/state/murmur/recording-session.json`. `stop-recording` interrupts that recorder, clears the session file, then runs the normal transcribe/transform/copy-or-paste pipeline. Use `murmur cancel-recording` for a cancel binding; it stops the recorder and deletes captured audio without insertion.
 
 ## Suggested early binding
 

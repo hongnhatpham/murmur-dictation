@@ -13,11 +13,15 @@ The agentic part lives mostly in the text transformation layer: punctuation, fil
 First CLI tracer bullet is available as a Python prototype:
 
 ```bash
-python -m pip install -e .
+python -m pip install -e '.[stt]'
+murmur init
+murmur doctor
 murmur dictate --duration 5
+# optional focused-app insertion when wtype/ydotool is available:
+murmur dictate --duration 5 --paste
 ```
 
-It records with `pw-record`, transcribes with a local/free STT backend (`faster-whisper` or `whisper.cpp`), lightly cleans text, copies to the Wayland clipboard with `wl-copy`, and stores local history. See [`docs/development/cli-tracer-bullet.md`](docs/development/cli-tracer-bullet.md) and [`docs/development/local-setup.md`](docs/development/local-setup.md) for setup.
+It records with `pw-record`, transcribes with a local/free STT backend (`faster-whisper` by default, or `whisper.cpp`), lightly cleans text, copies to the Wayland clipboard with `wl-copy`, can paste with `wtype`/`ydotool`, emits terse `notify-send` status, and stores local history. A conservative `murmur command` prototype can transform clipboard/selected text with local deterministic commands (`uppercase`, `lowercase`, `concise`) and falls back safely when desktop simulation is unavailable. Local personal vocabulary and snippets are managed with `murmur dictionary ...` and `murmur snippets ...`, backed by SQLite and fed into supported local STT/context paths. See [`docs/development/cli-tracer-bullet.md`](docs/development/cli-tracer-bullet.md), [`docs/development/local-setup.md`](docs/development/local-setup.md), and [`docs/setup/wayland-niri.md`](docs/setup/wayland-niri.md) for setup.
 
 ## Documents
 
@@ -26,8 +30,10 @@ It records with `pw-record`, transcribes with a local/free STT backend (`faster-
 - [`docs/engineering/architecture.md`](docs/engineering/architecture.md) — proposed Linux/Wayland architecture.
 - [`docs/roadmap.md`](docs/roadmap.md) — phased implementation plan.
 - [`docs/development/cli-tracer-bullet.md`](docs/development/cli-tracer-bullet.md) — local CLI prototype setup and usage.
-- [`docs/development/local-setup.md`](docs/development/local-setup.md) — config defaults, dependency checks, and history/recovery commands.
+- [`docs/development/local-setup.md`](docs/development/local-setup.md) — config defaults, dependency checks, history/recovery, dictionary, and snippets commands.
 - [`docs/setup/wayland-niri.md`](docs/setup/wayland-niri.md) — niri/Wayland hotkey, notification, and user-service setup.
+- [`docs/engineering/adr/0001-continue-python-through-mvp.md`](docs/engineering/adr/0001-continue-python-through-mvp.md) — implementation-language decision.
+- [`docs/engineering/adr/0002-local-stt-first.md`](docs/engineering/adr/0002-local-stt-first.md) — local/free STT provider decision.
 
 ## Product principles
 

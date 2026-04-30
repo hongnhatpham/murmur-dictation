@@ -12,6 +12,9 @@ python -m murmur init
 python -m murmur history --limit 10
 python -m murmur recopy-last
 python -m murmur last-transcript
+python -m murmur start-recording --paste
+python -m murmur stop-recording
+python -m murmur cancel-recording
 ```
 
 After editable install, the same commands are available as `murmur ...`:
@@ -34,6 +37,7 @@ Default state paths:
 
 - state directory: `${XDG_STATE_HOME}/murmur` or `~/.local/state/murmur`
 - history DB: `<state directory>/history.sqlite3`
+- personal dictionary/snippets DB: `<state directory>/personal.sqlite3`
 - model cache: `${XDG_CACHE_HOME}/murmur/models` or `~/.cache/murmur/models`
 - debug audio: `${XDG_CACHE_HOME}/murmur/audio` or `~/.cache/murmur/audio`
 
@@ -94,6 +98,28 @@ whisper_cpp_model = "~/.cache/murmur/models/ggml-base.en.bin"
 ```
 
 Download model files manually into the local model cache. Model binaries are ignored by git and should not be committed.
+
+## Personal dictionary and snippets
+
+Personal vocabulary and snippets are stored locally in SQLite at `<state directory>/personal.sqlite3` unless `paths.personal_db` is set in config.
+
+Dictionary terms are used as local STT hints where supported (`faster-whisper` initial prompt and `whisper.cpp --prompt`) and as deterministic cleanup context to restore preferred casing/spelling when the recognized words already match.
+
+Examples:
+
+```sh
+python -m murmur dictionary add "Niri"
+python -m murmur dictionary add "ARIA-03" --note "assistant profile name"
+python -m murmur dictionary list
+python -m murmur dictionary remove "Niri"
+
+python -m murmur snippets add ";sig" "Regards, Murmur"
+python -m murmur snippets list
+python -m murmur snippets expand ";sig"
+python -m murmur snippets remove ";sig"
+```
+
+`copy`, `paste`, `dictate`, and command-mode STT load this store at runtime. Snippet expansion is deterministic text expansion; it does not execute desktop actions.
 
 ## History and recovery
 

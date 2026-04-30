@@ -4,7 +4,7 @@ Source: `docs/product/prd.md`, `docs/engineering/architecture.md`, `docs/roadmap
 
 ## Doing
 
-- [ ] 4. Add hold-to-talk hotkey recording
+- [ ] Manual verification: paste into one browser field and one editor/text area; HITL local STT latency/accuracy bakeoff.
 
 ## Backlog
 
@@ -101,11 +101,11 @@ Add a foreground or daemon-like command that records while a global hotkey is he
 
 #### Acceptance criteria
 
-- [ ] A configurable global hotkey starts recording on press and stops on release.
-- [ ] Releasing the hotkey runs the existing transcribe/transform/insert pipeline.
-- [ ] Pressing cancel during recording or processing aborts without insertion.
-- [ ] The command prevents overlapping dictations while one is processing.
-- [ ] Hotkey setup and known compositor limitations are documented.
+- [x] An interim compositor-bindable command pair starts recording on press and stops on release.
+- [x] Releasing the hotkey runs the existing transcribe/transform/insert pipeline.
+- [x] Pressing cancel during recording aborts without insertion.
+- [x] The command prevents overlapping dictations while one is recording or processing.
+- [x] Hotkey setup and known compositor limitations are documented.
 
 #### Implementation notes
 
@@ -199,11 +199,11 @@ Add a local dictionary for names, project terms, acronyms, tools, and slang. Fee
 
 #### Acceptance criteria
 
-- [ ] CLI can add, list, and remove dictionary terms.
-- [ ] Dictionary terms are included in transform context.
-- [ ] STT hints are used when the selected provider supports them.
-- [ ] History can mark likely vocabulary misses for later review.
-- [ ] Documentation includes examples like project names and technical terms.
+- [x] CLI can add, list, and remove dictionary terms.
+- [x] Dictionary terms are included in transform context.
+- [x] STT hints are used when the selected provider supports them.
+- [ ] History can mark likely vocabulary misses for later review. Deferred: needs real dictation corpus/HITL review.
+- [x] Documentation includes examples like project names and technical terms.
 
 #### Implementation notes
 
@@ -222,11 +222,11 @@ Add a command-mode path for transforming selected text using a spoken instructio
 
 #### Acceptance criteria
 
-- [ ] Command mode uses a separate invocation/hotkey from normal dictation.
-- [ ] The spoken instruction is transcribed and passed with the selected text to the transform provider.
+- [x] Command mode uses a separate invocation/hotkey from normal dictation.
+- [x] The spoken instruction is transcribed and passed with the selected text to the transform provider.
 - [ ] Selection length is limited with a clear error for oversized input.
-- [ ] Replacement uses the same insertion/fallback safety model as dictation.
-- [ ] The previous selected text and replacement are stored in history unless private mode is enabled.
+- [x] Replacement uses the same insertion/fallback safety model as dictation.
+- [x] The previous selected text and replacement are stored in history unless private mode is enabled.
 - [ ] App undo can restore the prior selection in common text fields during manual verification.
 
 #### Implementation notes
@@ -269,11 +269,11 @@ Make Murmur easy to start, stop, restart, and run on login as a user-level servi
 
 #### Acceptance criteria
 
-- [ ] A documented install/dev command creates or updates a systemd user service.
-- [ ] Service starts Murmur with the configured environment.
-- [ ] Logs are accessible through `journalctl --user` or an equivalent documented path.
-- [ ] Service restart does not lose config or history.
-- [ ] Uninstall/disable instructions are documented.
+- [x] A documented install/dev command creates or updates systemd user service templates for the current one-shot pipeline and future daemon.
+- [x] The one-shot service starts `murmur dictate --paste` with the configured environment; the daemon service remains intentionally disabled until a service/daemon subcommand exists.
+- [x] Logs are accessible through `journalctl --user` or an equivalent documented path.
+- [x] Service restart does not lose config or history because both live under user XDG config/state paths.
+- [x] Uninstall/disable instructions are documented.
 
 #### Implementation notes
 
@@ -294,8 +294,8 @@ Compare candidate free/local STT models using real spoken samples from the userâ
 - [ ] At least two free/local STT options are tested on the same sample phrases.
 - [ ] Latency from hotkey release to final text is measured.
 - [ ] Accuracy is checked against names, project terms, code terms, and mixed casual speech.
-- [ ] A default free model decision is documented in the repo.
-- [ ] Required local model download/setup steps are documented without committing model binaries unless explicitly intended.
+- [x] A default free model decision is documented in the repo (see `docs/engineering/adr/0002-local-stt-first.md`; HITL bakeoff still pending before changing it).
+- [x] Required local model download/setup steps are documented without committing model binaries unless explicitly intended.
 
 #### Implementation notes
 
@@ -315,14 +315,14 @@ Make an explicit architecture decision on whether Murmurâ€™s daemon should conti
 
 #### Acceptance criteria
 
-- [ ] A short ADR is added under `docs/engineering/adr/`.
-- [ ] The ADR compares Python prototype continuation vs Rust daemon rewrite.
-- [ ] The decision accounts for hotkeys, audio capture, packaging, reliability, and development speed.
-- [ ] Follow-up TODO items are adjusted if the decision changes sequencing.
+- [x] A short ADR is added under `docs/engineering/adr/`.
+- [x] The ADR compares Python prototype continuation vs Rust daemon rewrite.
+- [x] The decision accounts for hotkeys, audio capture, packaging, reliability, and development speed.
+- [x] Follow-up TODO items are adjusted if the decision changes sequencing.
 
 #### Implementation notes
 
-- Do not decide this before the first tracer bullet teaches us where the real friction is.
+- Decision recorded in `docs/engineering/adr/0001-continue-python-through-mvp.md`: continue Python through MVP, revisit Rust only after measured daily-driver friction.
 
 ### 14. Add app-aware styles and snippets
 
@@ -338,8 +338,8 @@ Add app/category-aware dictation behavior and text snippets after the core loop 
 
 - [ ] Murmur can detect or accept the active app/category for transform context.
 - [ ] Config supports style presets for chat, email, docs, code, and terminal-like contexts.
-- [ ] Snippets can be added, listed, removed, and expanded.
-- [ ] Snippets and styles are stored locally.
+- [x] Snippets can be added, listed, removed, and expanded.
+- [x] Snippets and styles are stored locally.
 - [ ] Clean mode output changes appropriately by category without becoming unpredictable.
 
 #### Implementation notes

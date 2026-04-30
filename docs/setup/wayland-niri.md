@@ -39,22 +39,19 @@ Mod+Space repeat=false { spawn "sh" "-lc" "/path/to/murmur-dictation/.venv/bin/m
 
 Reload niri after editing its config.
 
-## Future hold-to-talk path
+## Hold-to-talk command pair
 
-For real hold-to-talk, Murmur needs either:
-
-1. a long-running service that listens for global hotkey press/release events itself; or
-2. an external keybinding layer that can run separate press and release commands.
-
-When command-pair support exists, it should stay compatible with the same pipeline:
+For real hold-to-talk, use an external keybinding layer that can run separate press and release commands. Murmur now exposes a conservative command pair:
 
 ```sh
-murmur record-start
-murmur record-stop --paste
-murmur cancel
+murmur start-recording --paste
+murmur stop-recording
+murmur cancel-recording
 ```
 
-The stop command should run `record -> transcribe -> transform -> copy -> insert -> history`; if paste simulation is unavailable, it should leave the text on the Wayland clipboard and notify `copied`.
+`start-recording` launches `pw-record`, writes a guarded session file under the state directory, and refuses overlapping recordings. `stop-recording` stops the recorder and runs `record -> transcribe -> transform -> copy -> insert -> history`; if paste simulation is unavailable, it leaves the text on the Wayland clipboard and notifies `copied`. `cancel-recording` stops recording and deletes the captured audio without insertion.
+
+niri's basic `binds` are press-triggered rather than release-triggered, so the one-shot `murmur dictate --paste` binding remains the recommended niri-only MVP path unless you add a release-aware binding helper.
 
 ## Minimal notifications
 
@@ -107,5 +104,5 @@ systemctl --user daemon-reload
 
 - One-shot service logs: `journalctl --user -u murmur-dictate.service -f`; daemon logs later: `journalctl --user -u murmur.service -f`.
 - Runtime config/env: `~/.config/murmur/`.
-- Local history/cache should remain under `~/.local/share/murmur` and `~/.cache/murmur`.
+- Local history/cache should remain under XDG state/cache paths: `~/.local/state/murmur` and `~/.cache/murmur` by default.
 - Do not commit model files, audio recordings, API keys, personal env files, or history databases.

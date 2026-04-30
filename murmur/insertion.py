@@ -19,6 +19,7 @@ class Simulator(Protocol):
     def available(self) -> bool: ...
     def paste(self) -> None: ...
     def press_enter(self) -> None: ...
+    def copy_selection(self) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -72,9 +73,40 @@ class ToolSimulator:
         if proc.returncode != 0:
             raise InsertionError(proc.stderr.strip() or f"{self.name} enter failed")
 
+    def copy_selection(self) -> None:
+        if self.name == "wtype":
+            proc = subprocess.run(["wtype", "-M", "ctrl", "-P", "c", "-p", "c", "-m", "ctrl"], capture_output=True, text=True)
+        elif self.name == "ydotool":
+            proc = subprocess.run(["ydotool", "key", "29:1", "46:1", "46:0", "29:0"], capture_output=True, text=True)
+        else:
+            raise InsertionError(f"Unsupported selection copy simulator: {self.name}")
+        if proc.returncode != 0:
+            raise InsertionError(proc.stderr.strip() or f"{self.name} selection copy failed")
+
 
 def copy_to_clipboard(text: str, tool: str = "wl-copy") -> None:
     WlClipboard(tool).copy(text)
+
+
+def read_clipboard(tool: str = "wl-paste") -> str:
+    if shutil.which(tool) is None:
+        raise InsertionError(f"Missing `{tool}`. Install wl-clipboard.")
+    proc = subprocess.run([tool, "--no-newline"], text=True, capture_output=True)
+    if proc.returncode != 0:
+        raise InsertionError(proc.stderr.strip() or f"{tool} failed")
+    return proc.stdout
+
+
+def copy_selection_to_clipboard(config: InsertionConfig) -> bool:
+    simulator = _first_available_simulator(config)
+    if simulator is None:
+        return False
+    try:
+        simulator.copy_selection()
+        time.sleep(0.08)
+        return True
+    except InsertionError:
+        return False
 
 
 def _has_enter_action(actions: list[object] | None) -> bool:

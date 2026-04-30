@@ -104,7 +104,8 @@ class HistoryStore:
     ) -> int:
         timestamp = created_at or datetime.now(timezone.utc).isoformat(timespec="seconds")
         action_text = ",".join(getattr(a, "name", str(a)) for a in (actions or []))
-        with self.connect() as conn:
+        conn = self.connect()
+        try:
             cur = conn.execute(
                 """
                 INSERT INTO dictations
@@ -113,10 +114,14 @@ class HistoryStore:
                 """,
                 (timestamp, mode, provider, transcript, final_text, action_text, insertion_status, audio_duration_ms, latency_ms, error_message or error),
             )
+            conn.commit()
             return int(cur.lastrowid)
+        finally:
+            conn.close()
 
     def recent(self, limit: int = 10) -> list[HistoryEntry]:
-        with self.connect() as conn:
+        conn = self.connect()
+        try:
             rows = conn.execute(
                 """
                 SELECT id, created_at, mode, provider, transcript, final_text, insertion_status, error_message
@@ -126,7 +131,9 @@ class HistoryStore:
                 """,
                 (limit,),
             ).fetchall()
-        return [_entry(row) for row in rows]
+            return [_entry(row) for row in rows]
+        finally:
+            conn.close()
 
     def last(self) -> HistoryEntry | None:
         items = self.recent(1)

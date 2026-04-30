@@ -33,3 +33,12 @@ def test_raw_mode_preserves_press_enter_literal():
 
 def test_clean_text_capitalizes_and_punctuates():
     assert clean_text("um this is fine") == "This is fine."
+
+
+def test_transform_applies_dictionary_terms_and_snippets():
+    result = transform_transcript(
+        "open niri then ;sig",
+        dictionary_terms=["Niri"],
+        snippets={";sig": "Regards, Murmur"},
+    )
+    assert result.final_text == "Open Niri then Regards, Murmur."
