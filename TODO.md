@@ -23,20 +23,21 @@ This should favor a fast prototype over final architecture. Python is acceptable
 #### Acceptance criteria
 
 - [ ] A repo command can record from the default microphone into a temporary audio file.
-- [ ] The audio is sent to one configured STT backend.
+- [ ] The audio is sent to one configured free/local STT backend.
 - [ ] The transcript is transformed into clean text with punctuation/capitalization cleanup.
 - [ ] The final text is copied to the Wayland clipboard.
 - [ ] Transcript, final text, timestamp, mode, and error state are stored locally.
 - [ ] Temporary audio is deleted after processing unless debug mode is enabled.
 - [ ] Failure after transcription still preserves the transcript/final text in history when available.
-- [ ] A README/dev note explains required local tools and environment variables without storing secrets.
+- [ ] A README/dev note explains required local tools, model download/setup, and environment variables without storing secrets.
 
 #### Implementation notes
 
 - Keep provider boundaries simple: `record -> transcribe -> transform -> copy -> history`.
 - Use `pw-record` or another PipeWire-compatible CLI tool for the first recorder.
 - Use `wl-copy` for clipboard output.
-- Keep API keys in environment variables or local ignored config only.
+- Use a free local STT model first; prefer `faster-whisper` or `whisper.cpp` over paid cloud APIs.
+- Keep any optional API keys in environment variables or local ignored config only.
 - Prefer JSONL or SQLite for the first history store; SQLite is the intended long-term shape.
 
 ### 2. Add deterministic cleanup actions to the tracer bullet
@@ -173,7 +174,7 @@ Introduce a real config file for STT provider, cleanup provider, default mode, p
 #### Acceptance criteria
 
 - [ ] Murmur loads config from a documented local path.
-- [ ] Config supports STT provider selection and provider-specific environment variable names.
+- [ ] Config supports STT provider selection, local model paths/names, and optional provider-specific environment variable names.
 - [ ] Config supports `raw` and `clean` modes.
 - [ ] Raw mode avoids aggressive cleanup and preserves literal wording more closely.
 - [ ] Clean mode remains the default.
@@ -278,27 +279,28 @@ Make Murmur easy to start, stop, restart, and run on login as a user-level servi
 
 - Keep service files templated so paths under `/mnt/storage/01 Projects/murmur-dictation` do not have to be hard-coded forever.
 
-### 12. Run a human latency/provider bakeoff
+### 12. Run a human free-model latency/provider bakeoff
 
 - Type: HITL
 - Blocked by: 1. Build the CLI dictation tracer bullet; 7. Add configurable providers and modes
-- User stories covered: Basic dictation quality; provider choice; latency success metric
+- User stories covered: Basic dictation quality; free/local model choice; latency success metric
 
 #### What to build
 
-Compare candidate STT/cleanup providers using real spoken samples from the user’s daily vocabulary. Decide the default MVP provider and fallback strategy.
+Compare candidate free/local STT models using real spoken samples from the user’s daily vocabulary. Decide the default MVP model, model size, and fallback strategy.
 
 #### Acceptance criteria
 
-- [ ] At least two STT options are tested on the same sample phrases.
+- [ ] At least two free/local STT options are tested on the same sample phrases.
 - [ ] Latency from hotkey release to final text is measured.
 - [ ] Accuracy is checked against names, project terms, code terms, and mixed casual speech.
-- [ ] A provider decision is documented in the repo.
-- [ ] Any required credentials/local models are documented without being committed.
+- [ ] A default free model decision is documented in the repo.
+- [ ] Required local model download/setup steps are documented without committing model binaries unless explicitly intended.
 
 #### Implementation notes
 
-- This is HITL because it requires real voice quality judgment and possibly credentials/model downloads.
+- This is HITL because it requires real voice quality judgment and model downloads.
+- Start with `faster-whisper` and/or `whisper.cpp`; only consider cloud STT later as an optional adapter, not the MVP default.
 - Good default decision likely beats endless provider abstraction.
 
 ### 13. Decide and document the long-term implementation language

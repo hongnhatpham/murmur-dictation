@@ -23,7 +23,7 @@ Tasks:
 
 - Choose prototype language: Python for speed or Rust if starting final daemon immediately.
 - Capture microphone audio into a temporary WAV file.
-- Send audio to one STT backend.
+- Send audio to one free/local STT backend.
 - Run basic cleanup.
 - Copy output to clipboard.
 - Store transcript/final text in a local history file or SQLite.
@@ -142,7 +142,7 @@ Acceptance criteria:
 - Long dictation background transform with accept/dismiss diff.
 - Browser extension for direct web text insertion and selected-text capture.
 - Editor extension for code-aware insertion.
-- Local whisper.cpp/faster-whisper optimization.
+- Local whisper.cpp/faster-whisper optimization and model-size bakeoff.
 - Search handoff to Perplexity/Google/ChatGPT/Claude.
 - Niri/Quickshell-specific integration polish.
 - Voice profile calibration.

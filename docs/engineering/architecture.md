@@ -54,20 +54,19 @@ MVP requirement: record while hotkey is held and produce a WAV/PCM buffer for ST
 
 Design as provider adapters behind a stable interface.
 
-Candidate providers:
+Candidate free/local providers:
 
-- Local:
-  - whisper.cpp;
-  - faster-whisper;
-  - Vosk only if low-resource/offline fallback needed.
-- Cloud:
-  - OpenAI/Groq/Deepgram-style APIs for low-latency first prototype.
+- `faster-whisper` with a free Whisper-family model, preferably GPU-backed if available;
+- `whisper.cpp` with a quantized free Whisper-family model for a simple local baseline;
+- Vosk only if a low-resource/offline fallback is needed.
+
+Cloud STT can remain an optional future adapter, but it is not the MVP default because the project should start with a free model.
 
 Recommended validation path:
 
-1. Cloud STT first to validate UX latency and quality.
-2. Add local whisper.cpp/faster-whisper as soon as the loop is useful.
-3. Keep provider switching configurable.
+1. Start with a free local STT backend, likely `faster-whisper` or `whisper.cpp`.
+2. Test model sizes for the best latency/accuracy tradeoff on this machine.
+3. Keep provider switching configurable so a cloud adapter can be added later without changing the pipeline.
 
 Provider interface:
 
@@ -203,8 +202,9 @@ raw = "SUPER+ALT+SPACE"
 command = "SUPER+SHIFT+SPACE"
 
 [stt]
-provider = "cloud"
-fallback = "whisper-local"
+provider = "faster-whisper"
+model = "base.en"
+fallback = "whisper-cpp"
 language = "auto"
 
 [cleanup]
@@ -257,7 +257,7 @@ keep_audio_days = 0
 - STT quality for names, tools, code terms, and mixed-language speech.
 - Cleanup overreach changing the user's intended meaning.
 - Clipboard side effects.
-- API/network dependency if local STT is too slow.
+- Local STT latency if the selected free model is too large or not GPU-accelerated.
 
 ## Recommended first tracer bullet
 
