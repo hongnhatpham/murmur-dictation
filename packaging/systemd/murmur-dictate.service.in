@@ -1,0 +1,15 @@
+[Unit]
+Description=Murmur one-shot dictation
+Documentation=https://github.com/hongnhatpham/murmur-dictation
+After=graphical-session.target pipewire.service wireplumber.service
+Wants=pipewire.service wireplumber.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=@PROJECT_DIR@
+EnvironmentFile=-%h/.config/murmur/env
+ExecStart=@MURMUR_BIN@ dictate --paste
+
+# The command needs the user's Wayland/session environment. If started from a
+# hotkey it normally inherits that; if started via systemctl, run:
+# systemctl --user import-environment WAYLAND_DISPLAY XDG_CURRENT_DESKTOP DBUS_SESSION_BUS_ADDRESS PATH

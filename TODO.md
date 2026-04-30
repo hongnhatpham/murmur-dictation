@@ -4,7 +4,7 @@ Source: `docs/product/prd.md`, `docs/engineering/architecture.md`, `docs/roadmap
 
 ## Doing
 
-- [ ] 1. Build the CLI dictation tracer bullet
+- [ ] 4. Add hold-to-talk hotkey recording
 
 ## Backlog
 
@@ -22,14 +22,14 @@ This should favor a fast prototype over final architecture. Python is acceptable
 
 #### Acceptance criteria
 
-- [ ] A repo command can record from the default microphone into a temporary audio file.
-- [ ] The audio is sent to one configured free/local STT backend.
-- [ ] The transcript is transformed into clean text with punctuation/capitalization cleanup.
-- [ ] The final text is copied to the Wayland clipboard.
-- [ ] Transcript, final text, timestamp, mode, and error state are stored locally.
-- [ ] Temporary audio is deleted after processing unless debug mode is enabled.
-- [ ] Failure after transcription still preserves the transcript/final text in history when available.
-- [ ] A README/dev note explains required local tools, model download/setup, and environment variables without storing secrets.
+- [x] A repo command can record from the default microphone into a temporary audio file.
+- [x] The audio is sent to one configured free/local STT backend.
+- [x] The transcript is transformed into clean text with punctuation/capitalization cleanup.
+- [x] The final text is copied to the Wayland clipboard.
+- [x] Transcript, final text, timestamp, mode, and error state are stored locally.
+- [x] Temporary audio is deleted after processing unless debug mode is enabled.
+- [x] Failure after transcription still preserves the transcript/final text in history when available.
+- [x] A README/dev note explains required local tools, model download/setup, and environment variables without storing secrets.
 
 #### Implementation notes
 
@@ -52,12 +52,12 @@ Extend the transform layer so it returns both final text and simple actions. The
 
 #### Acceptance criteria
 
-- [ ] The transform output includes `final_text` and `actions`.
-- [ ] If dictated speech ends with “press enter,” that phrase is removed from final text.
-- [ ] A `press_enter_after_insert` action is emitted when the phrase is detected.
-- [ ] If the only spoken content is “press enter,” the action is emitted with empty final text.
-- [ ] Unit tests cover case-insensitive phrase detection and punctuation variants.
-- [ ] Raw mode can preserve literal text without stripping the phrase.
+- [x] The transform output includes `final_text` and `actions`.
+- [x] If dictated speech ends with “press enter,” that phrase is removed from final text.
+- [x] A `press_enter_after_insert` action is emitted when the phrase is detected.
+- [x] If the only spoken content is “press enter,” the action is emitted with empty final text.
+- [x] Unit tests cover case-insensitive phrase detection and punctuation variants.
+- [x] Raw mode can preserve literal text without stripping the phrase.
 
 #### Implementation notes
 
@@ -76,12 +76,12 @@ Turn clipboard output into current-app insertion: set clipboard to final text, s
 
 #### Acceptance criteria
 
-- [ ] A command copies final text and triggers paste into the focused app.
+- [x] A command copies final text and triggers paste into the focused app.
 - [ ] The paste path works in at least one browser text field and one editor/text area during manual verification.
-- [ ] `press_enter_after_insert` sends Enter only after text paste is attempted.
-- [ ] If paste simulation is unavailable, the text remains on clipboard and the command exits with a clear message.
-- [ ] History records whether the result was pasted, copied-only, or failed.
-- [ ] The implementation is isolated behind an insertion interface for later Wayland/niri-specific strategies.
+- [x] `press_enter_after_insert` sends Enter only after text paste is attempted.
+- [x] If paste simulation is unavailable, the text remains on clipboard and the command exits with a clear message.
+- [x] History records whether the result was pasted, copied-only, or failed.
+- [x] The implementation is isolated behind an insertion interface for later Wayland/niri-specific strategies.
 
 #### Implementation notes
 
@@ -124,12 +124,12 @@ Make history useful enough for daily testing: list recent dictations, recopy the
 
 #### Acceptance criteria
 
-- [ ] History persists transcript, final text, timestamp, mode, provider, insertion status, and error message.
-- [ ] A CLI command lists recent dictations.
-- [ ] A CLI command copies the last final text back to clipboard.
-- [ ] A CLI command can print the last raw transcript.
-- [ ] Private mode can disable history writes.
-- [ ] No audio files or secrets are stored in history.
+- [x] History persists transcript, final text, timestamp, mode, provider, insertion status, and error message.
+- [x] A CLI command lists recent dictations.
+- [x] A CLI command copies the last final text back to clipboard.
+- [x] A CLI command can print the last raw transcript.
+- [x] Private mode can disable history writes.
+- [x] No audio files or secrets are stored in history.
 
 #### Implementation notes
 
@@ -148,12 +148,12 @@ Add terse status feedback before building a full Quickshell overlay. The user sh
 
 #### Acceptance criteria
 
-- [ ] Recording start shows a visible status.
-- [ ] Processing shows a visible status.
-- [ ] Successful paste shows a short confirmation.
-- [ ] Clipboard fallback shows a short confirmation.
-- [ ] Failure shows a useful error without exposing secrets.
-- [ ] Notifications/status messages do not steal focus.
+- [x] Recording start shows a visible status.
+- [x] Processing shows a visible status.
+- [x] Successful paste shows a short confirmation.
+- [x] Clipboard fallback shows a short confirmation.
+- [x] Failure shows a useful error without exposing secrets.
+- [x] Notifications/status messages do not steal focus.
 
 #### Implementation notes
 
@@ -173,13 +173,13 @@ Introduce a real config file for STT provider, cleanup provider, default mode, p
 
 #### Acceptance criteria
 
-- [ ] Murmur loads config from a documented local path.
-- [ ] Config supports STT provider selection, local model paths/names, and optional provider-specific environment variable names.
-- [ ] Config supports `raw` and `clean` modes.
-- [ ] Raw mode avoids aggressive cleanup and preserves literal wording more closely.
-- [ ] Clean mode remains the default.
-- [ ] Config supports disabling history.
-- [ ] Missing config produces safe defaults or a clear setup error.
+- [x] Murmur loads config from a documented local path.
+- [x] Config supports STT provider selection, local model paths/names, and optional provider-specific environment variable names.
+- [x] Config supports `raw` and `clean` modes.
+- [x] Raw mode avoids aggressive cleanup and preserves literal wording more closely.
+- [x] Clean mode remains the default.
+- [x] Config supports disabling history.
+- [x] Missing config produces safe defaults or a clear setup error.
 
 #### Implementation notes
 

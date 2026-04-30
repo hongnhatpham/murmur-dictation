@@ -1,0 +1,17 @@
+// Example Murmur bindings for niri. Copy the relevant lines into ~/.config/niri/config.kdl.
+// niri bindings are press-triggered; for the first MVP use a one-shot command
+// rather than true press/release hold-to-talk.
+
+binds {
+    // One-shot dictation: the command owns recording duration, transcription,
+    // clipboard copy/paste, and notifications.
+    Mod+Space repeat=false { spawn "sh" "-lc" "murmur dictate --paste"; }
+
+    // Optional: recover the last successful dictation to the clipboard.
+    Mod+Shift+Space repeat=false { spawn "sh" "-lc" "murmur recopy-last && notify-send --app-name=Murmur 'Murmur: copied last'"; }
+
+    // Optional interim pair if/when Murmur exposes start/stop commands and you
+    // bind them through a tool that supports key-release hooks.
+    // Mod+Alt+Space repeat=false { spawn "sh" "-lc" "murmur record-start"; }
+    // Mod+Alt+V repeat=false { spawn "sh" "-lc" "murmur record-stop --paste"; }
+}

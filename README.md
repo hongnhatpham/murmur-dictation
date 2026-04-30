@@ -10,7 +10,14 @@ The agentic part lives mostly in the text transformation layer: punctuation, fil
 
 ## Current status
 
-Planning repository. No implementation yet.
+First CLI tracer bullet is available as a Python prototype:
+
+```bash
+python -m pip install -e .
+murmur dictate --duration 5
+```
+
+It records with `pw-record`, transcribes with a local/free STT backend (`faster-whisper` or `whisper.cpp`), lightly cleans text, copies to the Wayland clipboard with `wl-copy`, and stores local history. See [`docs/development/cli-tracer-bullet.md`](docs/development/cli-tracer-bullet.md) and [`docs/development/local-setup.md`](docs/development/local-setup.md) for setup.
 
 ## Documents
 
@@ -18,6 +25,9 @@ Planning repository. No implementation yet.
 - [`docs/product/prd.md`](docs/product/prd.md) — product requirements for the first versions.
 - [`docs/engineering/architecture.md`](docs/engineering/architecture.md) — proposed Linux/Wayland architecture.
 - [`docs/roadmap.md`](docs/roadmap.md) — phased implementation plan.
+- [`docs/development/cli-tracer-bullet.md`](docs/development/cli-tracer-bullet.md) — local CLI prototype setup and usage.
+- [`docs/development/local-setup.md`](docs/development/local-setup.md) — config defaults, dependency checks, and history/recovery commands.
+- [`docs/setup/wayland-niri.md`](docs/setup/wayland-niri.md) — niri/Wayland hotkey, notification, and user-service setup.
 
 ## Product principles
 
