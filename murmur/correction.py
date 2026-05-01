@@ -7,6 +7,8 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Any, Iterable
 
+CORRECTION_KEEP_ALIVE = "30m"
+
 from .config import CorrectionConfig
 from .context import AppContext
 
@@ -81,7 +83,7 @@ def _correct_with_ollama(
             "properties": {"text": {"type": "string"}},
             "required": ["text"],
         },
-        "keep_alive": "10m",
+        "keep_alive": CORRECTION_KEEP_ALIVE,
         "options": {"temperature": 0, "top_p": 0.2, "num_predict": 160},
     }).encode("utf-8")
     req = urllib.request.Request(config.endpoint, data=payload, headers={"Content-Type": "application/json"}, method="POST")
@@ -89,6 +91,36 @@ def _correct_with_ollama(
         data = json.loads(response.read().decode("utf-8"))
     text = str(data.get("response", "")).strip()
     return _parse_model_response(text)
+
+
+def warm_correction_model(config: CorrectionConfig) -> CorrectionResult:
+    if not config.enabled:
+        return CorrectionResult("", provider="deterministic", status="skipped")
+    if config.provider != "ollama":
+        return CorrectionResult("", provider=config.provider, status="failed", error=f"unsupported correction provider: {config.provider}")
+    start = time.perf_counter()
+    payload = json.dumps({
+        "model": config.model,
+        "prompt": '/no_think Return JSON only: {"text":"ready"}',
+        "stream": False,
+        "format": {
+            "type": "object",
+            "properties": {"text": {"type": "string"}},
+            "required": ["text"],
+        },
+        "keep_alive": CORRECTION_KEEP_ALIVE,
+        "options": {"temperature": 0, "num_predict": 16},
+    }).encode("utf-8")
+    req = urllib.request.Request(config.endpoint, data=payload, headers={"Content-Type": "application/json"}, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=config.timeout_seconds) as response:
+            data = json.loads(response.read().decode("utf-8"))
+        text = _parse_model_response(str(data.get("response", "")))
+    except Exception as exc:
+        latency_ms = int((time.perf_counter() - start) * 1000)
+        return CorrectionResult("", provider=config.provider, status="fallback", latency_ms=latency_ms, error=str(exc))
+    latency_ms = int((time.perf_counter() - start) * 1000)
+    return CorrectionResult(text, provider=config.provider, status="warmed" if text else "fallback", latency_ms=latency_ms, error=None if text else "empty correction")
 
 
 def _build_prompt(

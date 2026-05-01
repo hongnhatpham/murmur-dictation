@@ -12,7 +12,7 @@ from .audio_cleanup import cleanup_successful_audio, prune_audio_dir
 from .command import route_command_transform
 from .config import ensure_local_dirs, load_config, sample_config
 from .context import current_app_context
-from .correction import correct_text
+from .correction import correct_text, warm_correction_model
 from .doctor import format_checks, has_required_failures, run_checks
 from .errors import MurmurError
 from .history import HistoryStore, format_entries
@@ -81,6 +81,9 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("cleanup-audio", help="remove cached Murmur audio files")
     p.add_argument("--keep-days", type=int, default=None, help="override configured audio retention window")
     p.set_defaults(func=cmd_cleanup_audio)
+
+    p = sub.add_parser("warm-correction", help="preload the local correction model")
+    p.set_defaults(func=cmd_warm_correction)
 
     p = sub.add_parser("dictate", help="record, transcribe, clean, and copy/paste")
     p.add_argument("--duration", type=float, default=5.0, help="fixed recording duration in seconds")
@@ -236,6 +239,17 @@ def cmd_cleanup_audio(args: argparse.Namespace) -> int:
     result = prune_audio_dir(cfg.paths.debug_audio_dir, keep_days=keep_days)
     print(f"removed={result.removed} freed_bytes={result.freed_bytes}")
     return 0
+
+
+def cmd_warm_correction(_args: argparse.Namespace) -> int:
+    cfg = load_config()
+    ensure_local_dirs(cfg)
+    result = warm_correction_model(cfg.correction)
+    if result.status == "warmed":
+        print(f"warmed {cfg.correction.model} in {result.latency_ms}ms")
+        return 0
+    print(f"correction warmup {result.status}: {result.error or 'not enabled'}", file=sys.stderr)
+    return 1 if result.status != "skipped" else 0
 
 
 def _cleanup_processed_audio(cfg, audio_path: Path, *, keep_audio: bool) -> None:
