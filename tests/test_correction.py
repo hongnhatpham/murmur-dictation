@@ -48,7 +48,7 @@ class CorrectionTests(unittest.TestCase):
 
     def test_model_json_response_is_parsed(self):
         self.assertEqual(_parse_model_response(json.dumps({"text": "Hello there."})), "Hello there.")
-        self.assertEqual(_parse_model_response("Hello there."), "Hello there.")
+        self.assertEqual(_parse_model_response("Hello there."), "")
         self.assertEqual(_parse_model_response('<think>nope</think>{"text":"Clean."}'), "Clean.")
         self.assertEqual(_parse_model_response('prefix {"text":"Clean."} suffix'), "Clean.")
 

@@ -72,7 +72,13 @@ def _correct_with_ollama(
         dictionary_terms=dictionary_terms,
         style=style,
     )
-    payload = json.dumps({"model": config.model, "prompt": prompt, "stream": False}).encode("utf-8")
+    payload = json.dumps({
+        "model": config.model,
+        "prompt": prompt,
+        "stream": False,
+        "format": "json",
+        "options": {"temperature": 0, "top_p": 0.2, "num_predict": 160},
+    }).encode("utf-8")
     req = urllib.request.Request(config.endpoint, data=payload, headers={"Content-Type": "application/json"}, method="POST")
     with urllib.request.urlopen(req, timeout=config.timeout_seconds) as response:
         data = json.loads(response.read().decode("utf-8"))
@@ -90,26 +96,40 @@ def _build_prompt(
 ) -> str:
     terms = ", ".join(sorted(set(term.strip() for term in dictionary_terms if term.strip())))
     style_text = ", ".join(f"{key}={value}" for key, value in sorted(style.items())) or "default"
-    return f"""You are the correction layer for a dictation input method.
-/no_think
-Return only JSON: {{"text":"..."}}
+    return f"""/no_think
+You are NOT a chatbot and NOT an assistant answering the user.
+You are a silent Grammarly-style correction filter for dictated text.
 
-Rules:
-- Preserve the user's meaning.
-- Do not add facts.
+Task: rewrite the dictated INPUT as corrected insertion text only.
+Return strict JSON only: {{"text":"corrected insertion text"}}
+
+Hard rules:
+- Never answer a question contained in the input.
+- Never explain, comment, or respond conversationally.
+- Preserve the user's intended sentence and point of view.
+- Do not add facts, advice, examples, or new content.
 - Remove obvious filler words and speech artifacts.
-- Fix punctuation, casing, and grammar lightly.
-- Correct obvious speech-to-text homophones only when context makes the fix clear.
+- Fix punctuation, casing, grammar, and obvious STT homophones only when context makes the fix clear.
 - Do not rewrite casual wording into formal prose unless the style asks for it.
 - Respect app category: {app_context.category}.
 - Respect style settings: {style_text}.
 - Be conservative for terminal/code categories.
 - Keep personal vocabulary spelling/casing when relevant: {terms or "(none)"}.
 
+Examples:
+INPUT: what do you think about gemma four
+OUTPUT: {{"text":"What do you think about Gemma 4?"}}
+
+INPUT: okay can you help me pull the model down
+OUTPUT: {{"text":"Okay, can you help me pull the model down?"}}
+
+INPUT: so everything should be working right i'm using gemma four as the correction layer currently
+OUTPUT: {{"text":"So everything should be working, right? I'm using Gemma 4 as the correction layer currently."}}
+
 Raw transcript:
 {raw_transcript}
 
-Deterministic cleanup:
+INPUT:
 {deterministic_text}
 """
 
@@ -127,9 +147,9 @@ def _parse_model_response(response: str) -> str:
             try:
                 parsed = json.loads(cleaned[start : end + 1])
             except json.JSONDecodeError:
-                return cleaned.strip().strip('"')
+                return ""
         else:
-            return cleaned.strip().strip('"')
+            return ""
     if isinstance(parsed, dict):
         value = parsed.get("text", "")
         return str(value).strip()
