@@ -29,6 +29,7 @@ from .session import (
     start_recording_session,
     stop_recording_process,
 )
+from .status import write_status
 from .stt import SttError, transcribe
 from .transform import transform_transcript
 
@@ -269,6 +270,7 @@ def _process_audio(
                 "Check that the default microphone works and PipeWire can see it (try `wpctl status` and `pw-record test.wav`).",
             )
         notify("Processing")
+        write_status(cfg.paths.state_dir, "processing", "Transcribing", ttl_seconds=30)
         personal = PersonalStore(cfg.paths.personal_path)
         term_entries = personal.list_terms()
         terms = [term.term for term in term_entries]
@@ -317,6 +319,7 @@ def _process_audio(
                 latency_ms=latency_ms,
             )
         notify("Inserted" if result.status == "pasted" else "Copied", result.message)
+        write_status(cfg.paths.state_dir, "inserted" if result.status == "pasted" else "copied", result.message, ttl_seconds=2.5)
         print(final_text)
         print(f"[{result.status}] {result.message} latency_ms={latency_ms}", file=sys.stderr)
         return 0
@@ -335,6 +338,7 @@ def _process_audio(
                 error_message=str(exc),
             )
         notify("Failed", str(exc))
+        write_status(cfg.paths.state_dir, "failed", str(exc), ttl_seconds=4)
         doctor = exc.doctor() if isinstance(exc, MurmurError) else str(exc)
         print(f"murmur: {doctor}", file=sys.stderr)
         return 1
@@ -356,6 +360,7 @@ def cmd_dictate(args: argparse.Namespace) -> int:
         cfg.paths.debug_audio_dir.mkdir(parents=True, exist_ok=True)
         audio_path = cfg.paths.debug_audio_dir / f"murmur-{int(time.time() * 1000)}.wav"
         notify("Recording")
+        write_status(cfg.paths.state_dir, "recording", "Recording", ttl_seconds=30)
         rec_start = time.perf_counter()
         record_audio(audio_path, args.duration)
         duration_ms = int((time.perf_counter() - rec_start) * 1000)
@@ -397,6 +402,7 @@ def cmd_start_recording(args: argparse.Namespace) -> int:
         return 1
     finally:
         release_lock(lock_path(cfg.paths.state_dir), fd)
+    write_status(cfg.paths.state_dir, "recording", "Recording", ttl_seconds=0)
     notify("Recording")
     print(f"recording pid={session.pid} audio={session.audio_path}")
     return 0
@@ -483,6 +489,7 @@ def cmd_cancel_recording(_args: argparse.Namespace) -> int:
         return 1
     finally:
         release_lock(lock_path(cfg.paths.state_dir), fd)
+    write_status(cfg.paths.state_dir, "canceled", "Canceled", ttl_seconds=2)
     notify("Canceled")
     print("canceled")
     return 0
@@ -558,8 +565,10 @@ def cmd_command(args: argparse.Namespace) -> int:
                 cfg.paths.debug_audio_dir.mkdir(parents=True, exist_ok=True)
                 audio_path = cfg.paths.debug_audio_dir / f"murmur-command-{int(time.time() * 1000)}.wav"
                 notify("Recording command")
+                write_status(cfg.paths.state_dir, "command", "Recording command", ttl_seconds=30)
                 record_audio(audio_path, args.duration)
             notify("Processing command")
+            write_status(cfg.paths.state_dir, "processing", "Command", ttl_seconds=30)
             personal = PersonalStore(cfg.paths.personal_path)
             tx = transcribe(audio_path, cfg.stt, dictionary_terms=[term.term for term in personal.list_terms()])
             provider = tx.provider
@@ -591,11 +600,13 @@ def cmd_command(args: argparse.Namespace) -> int:
                 insertion_status=result.status,
             )
         notify("Command applied" if result.status == "pasted" else "Command copied", result.message)
+        write_status(cfg.paths.state_dir, "inserted" if result.status == "pasted" else "copied", result.message, ttl_seconds=2.5)
         print(final_text)
         print(f"[{result.status}] {result.message}", file=sys.stderr)
         return 0
     except (MurmurError, SttError, InsertionError) as exc:
         notify("Command failed", str(exc))
+        write_status(cfg.paths.state_dir, "failed", str(exc), ttl_seconds=4)
         doctor = exc.doctor() if isinstance(exc, MurmurError) else str(exc)
         print(f"murmur: {doctor}", file=sys.stderr)
         return 1

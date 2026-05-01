@@ -246,11 +246,11 @@ Replace or augment notifications with a compact Quickshell overlay showing Murmu
 
 #### Acceptance criteria
 
-- [ ] Overlay shows recording, processing, inserted, copied fallback, failed, and command mode states.
-- [ ] Overlay does not steal focus from the target app.
-- [ ] Overlay auto-hides after completion or failure.
-- [ ] Overlay can receive state events from the daemon/prototype process.
-- [ ] The visual language is terse and utilitarian.
+- [x] Overlay shows recording, processing, inserted, copied fallback, failed, and command mode states.
+- [x] Overlay does not steal focus from the target app.
+- [x] Overlay auto-hides after completion or failure.
+- [x] Overlay can receive state events from the daemon/prototype process.
+- [x] The visual language is terse and utilitarian.
 
 #### Implementation notes
 
