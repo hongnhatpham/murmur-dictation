@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from murmur.insertion import insert_text
+from murmur.insertion import format_for_previous_text, insert_text
 from murmur.transform import TransformAction, PRESS_ENTER_AFTER_INSERT
 
 
@@ -72,6 +72,15 @@ class InsertionTests(unittest.TestCase):
         self.assertEqual(result.status, "pasted")
         self.assertEqual(simulator.calls, ["paste"])
         self.assertFalse(result.enter_sent)
+
+    def test_continuation_adds_space_and_lowercases_mid_sentence(self):
+        self.assertEqual(format_for_previous_text("Next thing.", "sentence"), " next thing.")
+
+    def test_continuation_does_not_add_space_before_punctuation(self):
+        self.assertEqual(format_for_previous_text(", next", "sentence"), ", next")
+
+    def test_continuation_does_not_lowercase_terminal_code(self):
+        self.assertEqual(format_for_previous_text("Next", "cmd", category="terminal"), " Next")
 
 
 if __name__ == "__main__":

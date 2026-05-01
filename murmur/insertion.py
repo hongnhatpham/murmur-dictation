@@ -202,6 +202,21 @@ def is_terminal_focused(config: InsertionConfig, window: dict | None = None) -> 
     return app_id in set(config.terminal_app_ids)
 
 
+def format_for_previous_text(text: str, previous_text: str, *, auto_leading_space: bool = True, category: str = "other") -> str:
+    if not text or not previous_text:
+        return text
+    no_space_before = set(",.;:!?)]}%\"'”’")
+    last = previous_text[-1]
+    result = text
+    if auto_leading_space and not text[0].isspace() and text[0] not in no_space_before and not last.isspace() and last not in "([{/$#@\n\t":
+        result = " " + result
+    if category not in {"terminal", "code"} and last not in ".!?…\n":
+        prefix_len = len(result) - len(result.lstrip())
+        if prefix_len < len(result) and result[prefix_len].isupper():
+            result = result[:prefix_len] + result[prefix_len].lower() + result[prefix_len + 1 :]
+    return result
+
+
 def should_prepend_space(text: str, config: InsertionConfig) -> bool:
     if not text or not getattr(config, "auto_leading_space", True):
         return False
@@ -214,10 +229,7 @@ def should_prepend_space(text: str, config: InsertionConfig) -> bool:
         return False
     if not existing:
         return False
-    last = existing[-1]
-    if last.isspace() or last in "([{/$#@\n\t":
-        return False
-    return True
+    return format_for_previous_text(text, existing, auto_leading_space=True) != text
 
 
 def refresh_niri_focus(window: dict | None) -> None:
@@ -273,8 +285,12 @@ def insert_text(
     clipboard = clipboard or WlClipboard(config.clipboard_tool)
     simulator = simulator or _first_available_simulator(config)
 
-    if not injected_clipboard and should_prepend_space(text, config):
-        text = " " + text
+    if not injected_clipboard:
+        try:
+            previous_text = read_clipboard()
+        except InsertionError:
+            previous_text = ""
+        text = format_for_previous_text(text, previous_text, auto_leading_space=getattr(config, "auto_leading_space", True))
 
     if text:
         clipboard.copy(text)

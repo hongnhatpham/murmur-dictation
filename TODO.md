@@ -336,7 +336,7 @@ Add app/category-aware dictation behavior and text snippets after the core loop 
 
 #### Acceptance criteria
 
-- [ ] Murmur can detect or accept the active app/category for transform context.
+- [x] Murmur can detect or accept the active app/category for transform context.
 - [x] Config supports style presets for chat, email, docs, code, and terminal-like contexts.
 - [x] Snippets can be added, listed, removed, and expanded.
 - [x] Snippets and styles are stored locally.
@@ -427,10 +427,10 @@ Improve cursor-adjacent formatting: leading spaces, lowercase continuation, punc
 #### Acceptance criteria
 
 - [x] Subsequent dictations insert a leading space when continuing prose.
-- [ ] Mid-sentence continuation can lowercase the first word when appropriate.
-- [ ] Punctuation-leading text does not receive an extra leading space.
-- [ ] Messaging categories can omit trailing periods when configured.
-- [ ] Unit tests cover continuation, punctuation, empty context, and terminal/code contexts.
+- [x] Mid-sentence continuation can lowercase the first word when appropriate.
+- [x] Punctuation-leading text does not receive an extra leading space.
+- [x] Messaging categories can omit trailing periods when configured.
+- [x] Unit tests cover continuation, punctuation, empty context, and terminal/code contexts.
 
 #### Implementation notes
 
