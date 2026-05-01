@@ -119,7 +119,7 @@ python -m murmur snippets expand ";sig"
 python -m murmur snippets remove ";sig"
 ```
 
-`copy`, `paste`, `dictate`, and command-mode STT load this store at runtime. Snippet expansion is deterministic text expansion; it does not execute desktop actions.
+`copy`, `paste`, `dictate`, and command-mode STT load this store at runtime. Snippet expansion is deterministic text expansion; it does not execute desktop actions. Command mode refuses selections larger than `[command].max_selection_chars` to avoid accidentally sending huge/private buffers through the transform path.
 
 ## History and recovery
 

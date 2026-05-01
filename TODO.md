@@ -224,7 +224,7 @@ Add a command-mode path for transforming selected text using a spoken instructio
 
 - [x] Command mode uses a separate invocation/hotkey from normal dictation.
 - [x] The spoken instruction is transcribed and passed with the selected text to the transform provider.
-- [ ] Selection length is limited with a clear error for oversized input.
+- [x] Selection length is limited with a clear error for oversized input.
 - [x] Replacement uses the same insertion/fallback safety model as dictation.
 - [x] The previous selected text and replacement are stored in history unless private mode is enabled.
 - [ ] App undo can restore the prior selection in common text fields during manual verification.

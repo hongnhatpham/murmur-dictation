@@ -13,6 +13,7 @@ class ConfigTests(unittest.TestCase):
             cfg = load_config(path)
         self.assertEqual(cfg.stt.provider, "faster-whisper")
         self.assertEqual(cfg.stt.model, "base.en")
+        self.assertEqual(cfg.command.max_selection_chars, 12000)
         self.assertEqual(cfg.insertion.paste_tool, "wtype")
         self.assertTrue(cfg.privacy.history)
         self.assertEqual(cfg.privacy.keep_audio_days, 1)

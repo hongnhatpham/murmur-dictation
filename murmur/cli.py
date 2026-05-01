@@ -515,6 +515,12 @@ def cmd_command(args: argparse.Namespace) -> int:
         if not selected_text:
             print("murmur: no selected/clipboard text to transform", file=sys.stderr)
             return 1
+        if len(selected_text) > cfg.command.max_selection_chars:
+            print(
+                f"murmur: selected text is too large ({len(selected_text)} chars; max {cfg.command.max_selection_chars})",
+                file=sys.stderr,
+            )
+            return 1
 
         if args.instruction:
             transcript_text = " ".join(args.instruction)

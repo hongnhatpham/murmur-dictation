@@ -87,6 +87,11 @@ class InsertionConfig:
 
 
 @dataclass(frozen=True)
+class CommandConfig:
+    max_selection_chars: int = 12000
+
+
+@dataclass(frozen=True)
 class ContextConfig:
     app_categories: dict[str, str] = field(default_factory=lambda: {
         "Alacritty": "terminal",
@@ -123,6 +128,7 @@ class MurmurConfig:
     paths: PathsConfig = field(default_factory=PathsConfig)
     stt: SttConfig = field(default_factory=SttConfig)
     cleanup: CleanupConfig = field(default_factory=CleanupConfig)
+    command: CommandConfig = field(default_factory=CommandConfig)
     insertion: InsertionConfig = field(default_factory=InsertionConfig)
     context: ContextConfig = field(default_factory=ContextConfig)
     privacy: PrivacyConfig = field(default_factory=PrivacyConfig)
@@ -159,6 +165,11 @@ def _merge_stt(data: dict[str, Any]) -> SttConfig:
 def _merge_cleanup(data: dict[str, Any]) -> CleanupConfig:
     defaults = CleanupConfig()
     return CleanupConfig(default_mode=str(data.get("default_mode", defaults.default_mode)))
+
+
+def _merge_command(data: dict[str, Any]) -> CommandConfig:
+    defaults = CommandConfig()
+    return CommandConfig(max_selection_chars=int(data.get("max_selection_chars", defaults.max_selection_chars)))
 
 
 def _merge_insertion(data: dict[str, Any]) -> InsertionConfig:
@@ -205,6 +216,7 @@ def load_config(path: str | Path | None = None) -> MurmurConfig:
         paths=_merge_paths(raw.get("paths", {})),
         stt=_merge_stt(raw.get("stt", {})),
         cleanup=_merge_cleanup(raw.get("cleanup", {})),
+        command=_merge_command(raw.get("command", {})),
         insertion=_merge_insertion(raw.get("insertion", {})),
         context=_merge_context(raw.get("context", {})),
         privacy=_merge_privacy(raw.get("privacy", {})),
@@ -241,6 +253,9 @@ language = "{defaults.stt.language}"
 
 [cleanup]
 default_mode = "{defaults.cleanup.default_mode}" # "clean" or "raw"
+
+[command]
+max_selection_chars = {defaults.command.max_selection_chars}
 
 [insertion]
 clipboard_tool = "{defaults.insertion.clipboard_tool}"
