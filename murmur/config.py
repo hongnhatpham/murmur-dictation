@@ -295,12 +295,16 @@ def sample_config() -> str:
 # debug_audio_dir = "{defaults.paths.debug_audio_dir}"
 
 [stt]
-# Local/free first. Supported MVP values: "faster-whisper" or "whisper-cpp".
+# Supported values: "faster-whisper", "whisper-cpp", or opt-in cloud "elevenlabs".
+# ElevenLabs requires ELEVENLABS_API_KEY/MURMUR_ELEVENLABS_API_KEY or ~/.config/murmur/elevenlabs_api_key.
 provider = "{defaults.stt.provider}"
 model = "{defaults.stt.model}"
 language = "{defaults.stt.language}"
 # whisper_cpp_binary = "{defaults.stt.whisper_cpp_binary}"
 # whisper_cpp_model = "{defaults.paths.model_dir / 'ggml-base.en.bin'}"
+# ElevenLabs example:
+# provider = "elevenlabs"
+# model = "scribe_v2"
 
 [cleanup]
 default_mode = "{defaults.cleanup.default_mode}" # "clean" or "raw"

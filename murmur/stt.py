@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
 import tempfile
+import urllib.error
+import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Protocol
@@ -39,7 +42,9 @@ def build_backend(provider: str) -> SttBackend:
         return FasterWhisperBackend()
     if provider in ("whispercpp", "whisper.cpp", "whisper-cpp"):
         return WhisperCppBackend()
-    raise MurmurError(f"Unknown STT provider: {provider}", "Use --provider faster-whisper, --provider whispercpp, or --provider auto.")
+    if provider in ("elevenlabs", "eleven-labs", "scribe"):
+        return ElevenLabsBackend()
+    raise MurmurError(f"Unknown STT provider: {provider}", "Use provider faster-whisper, whispercpp, elevenlabs, or auto.")
 
 
 class FasterWhisperBackend:
@@ -73,6 +78,63 @@ class FasterWhisperBackend:
                 "faster-whisper transcription failed.",
                 f"Model={self.model_name!r}, device={self.device!r}, compute_type={self.compute_type!r}. Set MURMUR_WHISPER_MODEL to a downloaded model name/path or try `base.en`. Details: {exc}",
             ) from exc
+
+
+class ElevenLabsBackend:
+    name = "elevenlabs"
+
+    def __init__(self) -> None:
+        self.model_name = os.environ.get("MURMUR_ELEVENLABS_MODEL", "scribe_v2")
+        self.endpoint = os.environ.get("MURMUR_ELEVENLABS_ENDPOINT", "https://api.elevenlabs.io/v1/speech-to-text")
+        self.api_key = _elevenlabs_api_key()
+        self.no_verbatim = os.environ.get("MURMUR_ELEVENLABS_NO_VERBATIM", "1") not in ("0", "false", "False")
+        self.timeout_seconds = float(os.environ.get("MURMUR_ELEVENLABS_TIMEOUT", "20"))
+
+    def transcribe(self, audio_path: Path, dictionary_terms: Iterable[str] | None = None) -> str:
+        if not self.api_key:
+            raise MurmurError(
+                "Missing ElevenLabs API key.",
+                "Set ELEVENLABS_API_KEY or MURMUR_ELEVENLABS_API_KEY in your environment before using stt.provider = \"elevenlabs\".",
+            )
+        if not audio_path.exists():
+            raise MurmurError("Audio file does not exist.", str(audio_path))
+
+        fields = {
+            "model_id": self.model_name,
+            "tag_audio_events": "false",
+            "diarize": "false",
+        }
+        if self.no_verbatim:
+            fields["no_verbatim"] = "true"
+        # Supplying language improves speed/accuracy when configured. ElevenLabs
+        # expects ISO-639 codes; Murmur's "auto" means omit this field.
+        language = os.environ.get("MURMUR_ELEVENLABS_LANGUAGE")
+        if language:
+            fields["language_code"] = language
+
+        body, content_type = _multipart_form_data(fields, file_field="file", file_path=audio_path)
+        req = urllib.request.Request(
+            self.endpoint,
+            data=body,
+            method="POST",
+            headers={
+                "xi-api-key": self.api_key,
+                "Content-Type": content_type,
+                "Accept": "application/json",
+            },
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=self.timeout_seconds) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")
+            raise MurmurError("ElevenLabs transcription failed.", f"HTTP {exc.code}: {detail}") from exc
+        except Exception as exc:
+            raise MurmurError("ElevenLabs transcription failed.", str(exc)) from exc
+        text = str(payload.get("text", "")).strip()
+        if not text and isinstance(payload.get("transcripts"), list):
+            text = " ".join(str(item.get("text", "")).strip() for item in payload["transcripts"] if isinstance(item, dict)).strip()
+        return text
 
 
 class WhisperCppBackend:
@@ -124,12 +186,48 @@ def transcribe(audio_path: Path, config: SttConfig, vocabulary: str | None = Non
             backend.binary = shutil.which(config.whisper_cpp_binary) or config.whisper_cpp_binary
             if config.whisper_cpp_model is not None:
                 backend.model_path = str(config.whisper_cpp_model)
+        elif config.provider in ("elevenlabs", "eleven-labs", "scribe"):
+            backend = ElevenLabsBackend()
+            backend.model_name = config.model or backend.model_name
+            if config.language and config.language != "auto":
+                os.environ.setdefault("MURMUR_ELEVENLABS_LANGUAGE", config.language)
         else:
             backend = build_backend(config.provider)
         terms = list(dictionary_terms or [])
         return Transcription(text=backend.transcribe(audio_path, dictionary_terms=terms), provider=backend.name)
     except MurmurError as exc:
         raise SttError(str(exc)) from exc
+
+
+def _elevenlabs_api_key() -> str | None:
+    key = os.environ.get("MURMUR_ELEVENLABS_API_KEY") or os.environ.get("ELEVENLABS_API_KEY")
+    if key:
+        return key.strip()
+    key_file = Path(os.environ.get("MURMUR_ELEVENLABS_API_KEY_FILE", Path.home() / ".config" / "murmur" / "elevenlabs_api_key")).expanduser()
+    try:
+        if key_file.exists():
+            return key_file.read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    return None
+
+
+def _multipart_form_data(fields: dict[str, str], *, file_field: str, file_path: Path) -> tuple[bytes, str]:
+    boundary = "----murmur-elevenlabs-boundary"
+    chunks: list[bytes] = []
+    for name, value in fields.items():
+        chunks.append(f"--{boundary}\r\n".encode("utf-8"))
+        chunks.append(f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode("utf-8"))
+        chunks.append(str(value).encode("utf-8"))
+        chunks.append(b"\r\n")
+    filename = file_path.name
+    chunks.append(f"--{boundary}\r\n".encode("utf-8"))
+    chunks.append(f'Content-Disposition: form-data; name="{file_field}"; filename="{filename}"\r\n'.encode("utf-8"))
+    chunks.append(b"Content-Type: audio/wav\r\n\r\n")
+    chunks.append(file_path.read_bytes())
+    chunks.append(b"\r\n")
+    chunks.append(f"--{boundary}--\r\n".encode("utf-8"))
+    return b"".join(chunks), f"multipart/form-data; boundary={boundary}"
 
 
 def _dictionary_prompt(dictionary_terms: Iterable[str] | None) -> str:

@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
 from . import paths
-from .config import MurmurConfig
+from .config import MurmurConfig, config_dir
 
 
 @dataclass(frozen=True)
@@ -59,6 +60,10 @@ def run_checks(config: MurmurConfig) -> list[Check]:
         checks.append(_tool(config.stt.whisper_cpp_binary, "whisper.cpp binary"))
         model = config.stt.whisper_cpp_model
         checks.append(Check("whisper.cpp model", bool(model and Path(model).expanduser().exists()), str(model or "not configured")))
+    elif config.stt.provider in ("elevenlabs", "eleven-labs", "scribe"):
+        key_file = Path(os.environ.get("MURMUR_ELEVENLABS_API_KEY_FILE", config_dir() / "elevenlabs_api_key")).expanduser()
+        has_key = bool(os.environ.get("MURMUR_ELEVENLABS_API_KEY") or os.environ.get("ELEVENLABS_API_KEY") or key_file.exists())
+        checks.append(Check("elevenlabs api key", has_key, f"Set ELEVENLABS_API_KEY, MURMUR_ELEVENLABS_API_KEY, or write {key_file}", required=True))
     else:
         checks.append(Check("stt provider", False, f"Unsupported provider `{config.stt.provider}`"))
 
