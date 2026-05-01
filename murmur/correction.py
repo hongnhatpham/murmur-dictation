@@ -7,7 +7,7 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Any, Iterable
 
-CORRECTION_KEEP_ALIVE = "30m"
+CORRECTION_KEEP_ALIVE = "10m"
 
 from .config import CorrectionConfig
 from .context import AppContext
