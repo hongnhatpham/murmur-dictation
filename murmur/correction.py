@@ -91,6 +91,7 @@ def _build_prompt(
     terms = ", ".join(sorted(set(term.strip() for term in dictionary_terms if term.strip())))
     style_text = ", ".join(f"{key}={value}" for key, value in sorted(style.items())) or "default"
     return f"""You are the correction layer for a dictation input method.
+/no_think
 Return only JSON: {{"text":"..."}}
 
 Rules:
@@ -98,6 +99,8 @@ Rules:
 - Do not add facts.
 - Remove obvious filler words and speech artifacts.
 - Fix punctuation, casing, and grammar lightly.
+- Correct obvious speech-to-text homophones only when context makes the fix clear.
+- Do not rewrite casual wording into formal prose unless the style asks for it.
 - Respect app category: {app_context.category}.
 - Respect style settings: {style_text}.
 - Be conservative for terminal/code categories.
@@ -114,11 +117,28 @@ Deterministic cleanup:
 def _parse_model_response(response: str) -> str:
     if not response:
         return ""
+    cleaned = _strip_thinking(response).strip()
     try:
-        parsed = json.loads(response)
+        parsed = json.loads(cleaned)
     except json.JSONDecodeError:
-        return response.strip().strip('"')
+        start = cleaned.find("{")
+        end = cleaned.rfind("}")
+        if start >= 0 and end > start:
+            try:
+                parsed = json.loads(cleaned[start : end + 1])
+            except json.JSONDecodeError:
+                return cleaned.strip().strip('"')
+        else:
+            return cleaned.strip().strip('"')
     if isinstance(parsed, dict):
         value = parsed.get("text", "")
         return str(value).strip()
     return str(parsed).strip()
+
+
+def _strip_thinking(response: str) -> str:
+    text = response
+    for close_tag in ("</think>", "<channel|>"):
+        if close_tag in text:
+            text = text.split(close_tag, 1)[1]
+    return text.replace("<think>", "").strip()
