@@ -12,7 +12,9 @@ CREATE TABLE IF NOT EXISTS dictionary_terms (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     created_at TEXT NOT NULL,
     term TEXT NOT NULL UNIQUE COLLATE NOCASE,
-    note TEXT
+    note TEXT,
+    replacement TEXT,
+    category TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_dictionary_terms_term ON dictionary_terms(term COLLATE NOCASE);
 
@@ -31,6 +33,8 @@ class DictionaryTerm:
     id: int
     term: str
     note: str | None = None
+    replacement: str | None = None
+    category: str | None = None
 
 
 @dataclass(frozen=True)
@@ -51,18 +55,21 @@ class PersonalStore:
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         conn.executescript(SCHEMA)
+        _ensure_columns(conn)
         return conn
 
-    def add_term(self, term: str, note: str | None = None) -> int:
+    def add_term(self, term: str, note: str | None = None, replacement: str | None = None, category: str | None = None) -> int:
         term = _normalize_required(term, "term")
+        replacement = replacement.strip() if replacement else None
+        category = category.strip() if category else None
         with self.connect() as conn:
             cur = conn.execute(
                 """
-                INSERT INTO dictionary_terms (created_at, term, note)
-                VALUES (?, ?, ?)
-                ON CONFLICT(term) DO UPDATE SET note = excluded.note
+                INSERT INTO dictionary_terms (created_at, term, note, replacement, category)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(term) DO UPDATE SET note = excluded.note, replacement = excluded.replacement, category = excluded.category
                 """,
-                (_now(), term, note),
+                (_now(), term, note, replacement, category),
             )
             if cur.lastrowid:
                 return int(cur.lastrowid)
@@ -71,8 +78,8 @@ class PersonalStore:
 
     def list_terms(self) -> list[DictionaryTerm]:
         with self.connect() as conn:
-            rows = conn.execute("SELECT id, term, note FROM dictionary_terms ORDER BY lower(term)").fetchall()
-        return [DictionaryTerm(id=int(r["id"]), term=str(r["term"]), note=r["note"]) for r in rows]
+            rows = conn.execute("SELECT id, term, note, replacement, category FROM dictionary_terms ORDER BY lower(term)").fetchall()
+        return [DictionaryTerm(id=int(r["id"]), term=str(r["term"]), note=r["note"], replacement=r["replacement"], category=r["category"]) for r in rows]
 
     def remove_term(self, key: str) -> bool:
         with self.connect() as conn:
@@ -116,7 +123,17 @@ class PersonalStore:
         return {s.trigger: s.expansion for s in self.list_snippets()}
 
 
-def apply_dictionary_terms(text: str, terms: Iterable[str]) -> str:
+def _ensure_columns(conn: sqlite3.Connection) -> None:
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(dictionary_terms)")}
+    for name, ddl in {
+        "replacement": "ALTER TABLE dictionary_terms ADD COLUMN replacement TEXT",
+        "category": "ALTER TABLE dictionary_terms ADD COLUMN category TEXT",
+    }.items():
+        if name not in existing:
+            conn.execute(ddl)
+
+
+def apply_dictionary_terms(text: str, terms: Iterable[str | DictionaryTerm]) -> str:
     """Restore preferred casing/spelling for known terms in cleaned text.
 
     This intentionally stays deterministic: if Whisper produced the same words
@@ -126,9 +143,19 @@ def apply_dictionary_terms(text: str, terms: Iterable[str]) -> str:
     """
 
     result = text
-    for term in sorted({t.strip() for t in terms if t.strip()}, key=len, reverse=True):
-        pattern = re.compile(rf"(?<!\w){re.escape(term)}(?!\w)", re.IGNORECASE)
-        result = pattern.sub(term, result)
+    replacements: dict[str, str] = {}
+    for item in terms:
+        if isinstance(item, DictionaryTerm):
+            source = item.term.strip()
+            target = (item.replacement or item.term).strip()
+        else:
+            source = str(item).strip()
+            target = source
+        if source:
+            replacements[source] = target
+    for source, target in sorted(replacements.items(), key=lambda item: len(item[0]), reverse=True):
+        pattern = re.compile(rf"(?<!\w){re.escape(source)}(?!\w)", re.IGNORECASE)
+        result = pattern.sub(target, result)
     return result
 
 
@@ -145,8 +172,10 @@ def apply_snippets(text: str, snippets: Mapping[str, str]) -> str:
 def format_terms(terms: Iterable[DictionaryTerm]) -> str:
     lines = []
     for term in terms:
+        replacement = f" -> {term.replacement}" if term.replacement else ""
+        category = f" [{term.category}]" if term.category else ""
         note = f"  # {term.note}" if term.note else ""
-        lines.append(f"{term.id:>4}  {term.term}{note}")
+        lines.append(f"{term.id:>4}  {term.term}{replacement}{category}{note}")
     return "\n".join(lines)
 
 

@@ -154,6 +154,8 @@ def build_parser() -> argparse.ArgumentParser:
     dp = dict_sub.add_parser("add", help="add or update a dictionary term")
     dp.add_argument("term")
     dp.add_argument("--note", help="optional private note")
+    dp.add_argument("--replacement", help="replacement text to use when this term is recognized")
+    dp.add_argument("--category", help="optional app/category where this term is most relevant")
     dp.set_defaults(func=cmd_dictionary_add)
     dp = dict_sub.add_parser("list", help="list dictionary terms")
     dp.set_defaults(func=cmd_dictionary_list)
@@ -265,7 +267,8 @@ def _process_audio(
             )
         notify("Processing")
         personal = PersonalStore(cfg.paths.personal_path)
-        terms = [term.term for term in personal.list_terms()]
+        term_entries = personal.list_terms()
+        terms = [term.term for term in term_entries]
         snippets = personal.snippet_map()
         tx = transcribe(audio_path, cfg.stt, dictionary_terms=terms)
         provider = tx.provider
@@ -274,7 +277,7 @@ def _process_audio(
             transcript_text,
             mode=mode,
             press_enter_phrase=cfg.insertion.press_enter_phrase,
-            dictionary_terms=terms,
+            dictionary_terms=term_entries,
             snippets=snippets,
         )
         app_context = current_app_context(cfg.context)
@@ -491,7 +494,7 @@ def _cmd_insert_text(args: argparse.Namespace, *, paste: bool) -> int:
         transcript_text,
         mode=mode,
         press_enter_phrase=cfg.insertion.press_enter_phrase,
-        dictionary_terms=[term.term for term in personal.list_terms()],
+        dictionary_terms=personal.list_terms(),
         snippets=personal.snippet_map(),
     )
     app_context = current_app_context(cfg.context)
@@ -659,7 +662,7 @@ def _personal_store() -> PersonalStore:
 
 def cmd_dictionary_add(args: argparse.Namespace) -> int:
     try:
-        term_id = _personal_store().add_term(args.term, note=args.note)
+        term_id = _personal_store().add_term(args.term, note=args.note, replacement=args.replacement, category=args.category)
     except ValueError as exc:
         print(f"murmur: {exc}", file=sys.stderr)
         return 1

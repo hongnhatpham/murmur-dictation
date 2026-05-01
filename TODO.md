@@ -448,11 +448,11 @@ Upgrade the dictionary from simple term storage to correction-aware vocabulary: 
 
 #### Acceptance criteria
 
-- [ ] Dictionary entries can include preferred casing and optional replacement text.
-- [ ] Correction prompts and deterministic cleanup receive relevant dictionary entries.
+- [x] Dictionary entries can include preferred casing and optional replacement text.
+- [x] Correction prompts and deterministic cleanup receive relevant dictionary entries.
 - [ ] History can surface likely misses for review.
-- [ ] CLI supports add/list/remove for the expanded fields.
-- [ ] Existing dictionary data migrates or remains compatible.
+- [x] CLI supports add/list/remove for the expanded fields.
+- [x] Existing dictionary data migrates or remains compatible.
 
 #### Implementation notes
 

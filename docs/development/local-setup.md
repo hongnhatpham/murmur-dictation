@@ -139,7 +139,7 @@ Examples:
 
 ```sh
 python -m murmur dictionary add "Niri"
-python -m murmur dictionary add "ARIA-03" --note "assistant profile name"
+python -m murmur dictionary add "a r e a three" --replacement "ARIA-03" --category docs --note "assistant profile name"
 python -m murmur dictionary list
 python -m murmur dictionary remove "Niri"
 
