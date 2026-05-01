@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import argparse
+import re
+import sqlite3
 import sys
 import time
 import traceback
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from pathlib import Path
 
 from .audio import record_audio
@@ -81,6 +84,14 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("cleanup-audio", help="remove cached Murmur audio files")
     p.add_argument("--keep-days", type=int, default=None, help="override configured audio retention window")
     p.set_defaults(func=cmd_cleanup_audio)
+
+    p = sub.add_parser("provider-profile", help="switch between local and cloud provider presets")
+    p.add_argument("profile", choices=["cloud", "local"])
+    p.set_defaults(func=cmd_provider_profile)
+
+    p = sub.add_parser("usage", help="show approximate provider usage and cost")
+    p.add_argument("--days", type=int, default=1)
+    p.set_defaults(func=cmd_usage)
 
     p = sub.add_parser("warm-correction", help="preload the local correction model")
     p.set_defaults(func=cmd_warm_correction)
@@ -241,6 +252,77 @@ def cmd_cleanup_audio(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_provider_profile(args: argparse.Namespace) -> int:
+    cfg = load_config()
+    cfg.config_path.parent.mkdir(parents=True, exist_ok=True)
+    text = cfg.config_path.read_text(encoding="utf-8") if cfg.config_path.exists() else sample_config()
+    if args.profile == "cloud":
+        text = _set_toml_value(text, "stt", "provider", '"groq"')
+        text = _set_toml_value(text, "stt", "model", '"whisper-large-v3-turbo"')
+        text = _set_toml_value(text, "stt", "language", '"en"')
+        text = _set_toml_value(text, "correction", "enabled", "true")
+        text = _set_toml_value(text, "correction", "provider", '"groq"')
+        text = _set_toml_value(text, "correction", "model", '"openai/gpt-oss-20b"')
+        text = _set_toml_value(text, "correction", "endpoint", '"https://api.groq.com/openai/v1/chat/completions"')
+    else:
+        text = _set_toml_value(text, "stt", "provider", '"faster-whisper"')
+        text = _set_toml_value(text, "stt", "model", '"small.en"')
+        text = _set_toml_value(text, "stt", "language", '"en"')
+        text = _set_toml_value(text, "correction", "provider", '"ollama"')
+        text = _set_toml_value(text, "correction", "model", '"qwen3:1.7b"')
+        text = _set_toml_value(text, "correction", "endpoint", '"http://127.0.0.1:11434/api/generate"')
+    cfg.config_path.write_text(text, encoding="utf-8")
+    print(f"{args.profile} profile written to {cfg.config_path}")
+    return 0
+
+
+def _set_toml_value(text: str, section: str, key: str, value: str) -> str:
+    pattern = re.compile(rf"(^\[{re.escape(section)}\]\n)(.*?)(?=^\[|\Z)", re.M | re.S)
+    match = pattern.search(text)
+    if not match:
+        return text.rstrip() + f"\n\n[{section}]\n{key} = {value}\n"
+    body = match.group(2)
+    key_pattern = re.compile(rf"^(#\s*)?{re.escape(key)}\s*=.*$", re.M)
+    if key_pattern.search(body):
+        body = key_pattern.sub(f"{key} = {value}", body, count=1)
+    else:
+        body = body.rstrip() + f"\n{key} = {value}\n"
+    return text[: match.start(2)] + body + text[match.end(2) :]
+
+
+def cmd_usage(args: argparse.Namespace) -> int:
+    cfg = load_config()
+    ensure_local_dirs(cfg)
+    if not cfg.paths.history_path.exists():
+        print("No history yet.")
+        return 0
+    cutoff = f"-{max(args.days, 1)} days"
+    with sqlite3.connect(cfg.paths.history_path) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            """
+            SELECT provider, COUNT(*) AS requests, COALESCE(SUM(audio_duration_ms), 0) AS audio_ms,
+                   COALESCE(AVG(latency_ms), 0) AS avg_latency_ms
+            FROM dictations
+            WHERE created_at >= datetime('now', ?)
+            GROUP BY provider
+            ORDER BY requests DESC
+            """,
+            (cutoff,),
+        ).fetchall()
+    if not rows:
+        print("No usage in this window.")
+        return 0
+    for row in rows:
+        audio_seconds = int(row["audio_ms"] or 0) / 1000
+        estimate = ""
+        if row["provider"] == "groq":
+            billable_seconds = max(audio_seconds, int(row["requests"] or 0) * 10)
+            estimate = f" estimated_stt_cost=${billable_seconds / 3600 * 0.04:.4f}"
+        print(f"provider={row['provider']} requests={row['requests']} audio_seconds={audio_seconds:.1f} avg_latency_ms={int(row['avg_latency_ms'])}{estimate}")
+    return 0
+
+
 def cmd_warm_correction(_args: argparse.Namespace) -> int:
     cfg = load_config()
     ensure_local_dirs(cfg)
@@ -302,15 +384,25 @@ def _process_audio(
         app_context = current_app_context(cfg.context)
         style = style_for_category(app_context.category, cfg.styles)
         styled_text = apply_style(transformed.final_text, style)
-        correction = correct_text(
-            raw_transcript=transcript_text,
-            deterministic_text=styled_text,
-            mode=mode,
-            config=cfg.correction,
-            app_context=app_context,
-            dictionary_terms=terms,
-            style=style.settings,
-        )
+        skip_reason = _correction_skip_reason(cfg, app_context.category, duration_ms)
+        if skip_reason:
+            correction = SimpleNamespace(
+                final_text=styled_text,
+                provider=cfg.correction.provider,
+                status="skipped",
+                latency_ms=0,
+                error=skip_reason,
+            )
+        else:
+            correction = correct_text(
+                raw_transcript=transcript_text,
+                deterministic_text=styled_text,
+                mode=mode,
+                config=cfg.correction,
+                app_context=app_context,
+                dictionary_terms=terms,
+                style=style.settings,
+            )
         final_text = correction.final_text
         result = insert_text(final_text, transformed.actions, cfg.insertion, paste=paste)
         latency_ms = int((time.perf_counter() - start) * 1000)
@@ -327,6 +419,7 @@ def _process_audio(
                 focused_app_id=app_context.focused_app_id,
                 app_category=app_context.category,
                 style_applied=style.name,
+                correction_error=correction.error,
                 actions=transformed.actions,
                 insertion_status=result.status,
                 audio_duration_ms=duration_ms,
@@ -356,6 +449,16 @@ def _process_audio(
         doctor = exc.doctor() if isinstance(exc, MurmurError) else str(exc)
         print(f"murmur: {doctor}", file=sys.stderr)
         return 1
+
+
+def _correction_skip_reason(cfg, app_category: str, duration_ms: int | None) -> str | None:
+    if not cfg.correction.enabled:
+        return None
+    if app_category in cfg.correction.skip_categories:
+        return f"policy: category {app_category}"
+    if duration_ms is not None and cfg.correction.skip_below_duration_ms > 0 and duration_ms < cfg.correction.skip_below_duration_ms:
+        return f"policy: duration {duration_ms}ms < {cfg.correction.skip_below_duration_ms}ms"
+    return None
 
 
 def cmd_dictate(args: argparse.Namespace) -> int:

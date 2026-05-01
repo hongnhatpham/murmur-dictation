@@ -107,6 +107,8 @@ class CorrectionConfig:
     endpoint: str = "http://127.0.0.1:11434/api/generate"
     timeout_seconds: float = 2.5
     raw_mode: bool = False
+    skip_categories: tuple[str, ...] = ()
+    skip_below_duration_ms: int = 0
 
 
 @dataclass(frozen=True)
@@ -206,6 +208,8 @@ def _merge_styles(data: dict[str, Any]) -> StyleConfig:
 
 def _merge_correction(data: dict[str, Any]) -> CorrectionConfig:
     defaults = CorrectionConfig()
+    raw_skip_categories = data.get("skip_categories", defaults.skip_categories)
+    skip_categories = tuple(str(item) for item in raw_skip_categories) if isinstance(raw_skip_categories, list | tuple) else defaults.skip_categories
     return CorrectionConfig(
         enabled=bool(data.get("enabled", defaults.enabled)),
         provider=str(data.get("provider", defaults.provider)),
@@ -213,6 +217,8 @@ def _merge_correction(data: dict[str, Any]) -> CorrectionConfig:
         endpoint=str(data.get("endpoint", defaults.endpoint)),
         timeout_seconds=float(data.get("timeout_seconds", defaults.timeout_seconds)),
         raw_mode=bool(data.get("raw_mode", defaults.raw_mode)),
+        skip_categories=skip_categories,
+        skip_below_duration_ms=int(data.get("skip_below_duration_ms", defaults.skip_below_duration_ms)),
     )
 
 
@@ -328,6 +334,9 @@ model = "{defaults.correction.model}"
 endpoint = "{defaults.correction.endpoint}"
 timeout_seconds = {defaults.correction.timeout_seconds}
 raw_mode = false
+# Optional latency policy: skip AI correction where STT is usually enough.
+skip_categories = []
+skip_below_duration_ms = 0
 
 [command]
 max_selection_chars = {defaults.command.max_selection_chars}
