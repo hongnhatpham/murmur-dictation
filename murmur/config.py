@@ -295,13 +295,17 @@ def sample_config() -> str:
 # debug_audio_dir = "{defaults.paths.debug_audio_dir}"
 
 [stt]
-# Supported values: "faster-whisper", "whisper-cpp", or opt-in cloud "elevenlabs".
+# Supported values: "faster-whisper", "whisper-cpp", or opt-in cloud "groq"/"elevenlabs".
+# Groq requires GROQ_API_KEY/MURMUR_GROQ_API_KEY or ~/.config/murmur/groq_api_key.
 # ElevenLabs requires ELEVENLABS_API_KEY/MURMUR_ELEVENLABS_API_KEY or ~/.config/murmur/elevenlabs_api_key.
 provider = "{defaults.stt.provider}"
 model = "{defaults.stt.model}"
 language = "{defaults.stt.language}"
 # whisper_cpp_binary = "{defaults.stt.whisper_cpp_binary}"
 # whisper_cpp_model = "{defaults.paths.model_dir / 'ggml-base.en.bin'}"
+# Groq example:
+# provider = "groq"
+# model = "whisper-large-v3-turbo"
 # ElevenLabs example:
 # provider = "elevenlabs"
 # model = "scribe_v2"

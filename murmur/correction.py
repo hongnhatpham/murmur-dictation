@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 import urllib.error
 import urllib.request
+from pathlib import Path
 from dataclasses import dataclass
 from typing import Any, Iterable
 
@@ -36,12 +38,13 @@ def correct_text(
         return CorrectionResult(deterministic_text, provider="deterministic", status="skipped")
     if mode == "raw" and not config.raw_mode:
         return CorrectionResult(deterministic_text, provider=config.provider, status="skipped")
-    if config.provider != "ollama":
+    if config.provider not in ("ollama", "groq"):
         return CorrectionResult(deterministic_text, provider=config.provider, status="failed", error=f"unsupported correction provider: {config.provider}")
 
     start = time.perf_counter()
     try:
-        corrected = _correct_with_ollama(
+        corrector = _correct_with_groq if config.provider == "groq" else _correct_with_ollama
+        corrected = corrector(
             raw_transcript=raw_transcript,
             deterministic_text=deterministic_text,
             config=config,
@@ -93,6 +96,58 @@ def _correct_with_ollama(
     return _parse_model_response(text)
 
 
+def _correct_with_groq(
+    *,
+    raw_transcript: str,
+    deterministic_text: str,
+    config: CorrectionConfig,
+    app_context: AppContext,
+    dictionary_terms: Iterable[str],
+    style: dict[str, Any],
+) -> str:
+    api_key = _groq_api_key()
+    if not api_key:
+        raise RuntimeError("missing Groq API key; set GROQ_API_KEY/MURMUR_GROQ_API_KEY or write ~/.config/murmur/groq_api_key")
+    prompt = _build_prompt(
+        raw_transcript=raw_transcript,
+        deterministic_text=deterministic_text,
+        app_context=app_context,
+        dictionary_terms=dictionary_terms,
+        style=style,
+    )
+    endpoint = config.endpoint
+    if "11434" in endpoint or endpoint.endswith("/api/generate"):
+        endpoint = "https://api.groq.com/openai/v1/chat/completions"
+    payload = json.dumps({
+        "model": config.model,
+        "messages": [
+            {"role": "system", "content": "You are a strict JSON dictation correction filter."},
+            {"role": "user", "content": prompt},
+        ],
+        "temperature": 0,
+        "top_p": 0.2,
+        "max_completion_tokens": 180,
+        "response_format": {"type": "json_object"},
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        endpoint,
+        data=payload,
+        headers={"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=config.timeout_seconds) as response:
+            data = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"HTTP {exc.code}: {detail}") from exc
+    choices = data.get("choices") or []
+    if not choices:
+        return ""
+    message = choices[0].get("message", {}) if isinstance(choices[0], dict) else {}
+    return _parse_model_response(str(message.get("content", "")))
+
+
 def warm_correction_model(config: CorrectionConfig) -> CorrectionResult:
     if not config.enabled:
         return CorrectionResult("", provider="deterministic", status="skipped")
@@ -121,6 +176,19 @@ def warm_correction_model(config: CorrectionConfig) -> CorrectionResult:
         return CorrectionResult("", provider=config.provider, status="fallback", latency_ms=latency_ms, error=str(exc))
     latency_ms = int((time.perf_counter() - start) * 1000)
     return CorrectionResult(text, provider=config.provider, status="warmed" if text else "fallback", latency_ms=latency_ms, error=None if text else "empty correction")
+
+
+def _groq_api_key() -> str | None:
+    key = os.environ.get("MURMUR_GROQ_API_KEY") or os.environ.get("GROQ_API_KEY")
+    if key:
+        return key.strip()
+    key_file = Path(os.environ.get("MURMUR_GROQ_API_KEY_FILE", Path.home() / ".config" / "murmur" / "groq_api_key")).expanduser()
+    try:
+        if key_file.exists():
+            return key_file.read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    return None
 
 
 def _build_prompt(

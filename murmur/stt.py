@@ -44,7 +44,9 @@ def build_backend(provider: str) -> SttBackend:
         return WhisperCppBackend()
     if provider in ("elevenlabs", "eleven-labs", "scribe"):
         return ElevenLabsBackend()
-    raise MurmurError(f"Unknown STT provider: {provider}", "Use provider faster-whisper, whispercpp, elevenlabs, or auto.")
+    if provider == "groq":
+        return GroqBackend()
+    raise MurmurError(f"Unknown STT provider: {provider}", "Use provider faster-whisper, whispercpp, elevenlabs, groq, or auto.")
 
 
 class FasterWhisperBackend:
@@ -78,6 +80,54 @@ class FasterWhisperBackend:
                 "faster-whisper transcription failed.",
                 f"Model={self.model_name!r}, device={self.device!r}, compute_type={self.compute_type!r}. Set MURMUR_WHISPER_MODEL to a downloaded model name/path or try `base.en`. Details: {exc}",
             ) from exc
+
+
+class GroqBackend:
+    name = "groq"
+
+    def __init__(self) -> None:
+        self.model_name = os.environ.get("MURMUR_GROQ_STT_MODEL", "whisper-large-v3-turbo")
+        self.endpoint = os.environ.get("MURMUR_GROQ_STT_ENDPOINT", "https://api.groq.com/openai/v1/audio/transcriptions")
+        self.api_key = _groq_api_key()
+        self.timeout_seconds = float(os.environ.get("MURMUR_GROQ_TIMEOUT", "20"))
+        self.language = os.environ.get("MURMUR_GROQ_LANGUAGE")
+
+    def transcribe(self, audio_path: Path, dictionary_terms: Iterable[str] | None = None) -> str:
+        if not self.api_key:
+            raise MurmurError(
+                "Missing Groq API key.",
+                "Set GROQ_API_KEY or MURMUR_GROQ_API_KEY, or write ~/.config/murmur/groq_api_key.",
+            )
+        fields = {
+            "model": self.model_name,
+            "response_format": "json",
+            "temperature": "0",
+        }
+        if self.language:
+            fields["language"] = self.language
+        prompt = _dictionary_prompt(dictionary_terms)
+        if prompt:
+            fields["prompt"] = prompt[:900]
+        body, content_type = _multipart_form_data(fields, file_field="file", file_path=audio_path)
+        req = urllib.request.Request(
+            self.endpoint,
+            data=body,
+            method="POST",
+            headers={
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": content_type,
+                "Accept": "application/json",
+            },
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=self.timeout_seconds) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")
+            raise MurmurError("Groq transcription failed.", f"HTTP {exc.code}: {detail}") from exc
+        except Exception as exc:
+            raise MurmurError("Groq transcription failed.", str(exc)) from exc
+        return str(payload.get("text", "")).strip()
 
 
 class ElevenLabsBackend:
@@ -186,6 +236,11 @@ def transcribe(audio_path: Path, config: SttConfig, vocabulary: str | None = Non
             backend.binary = shutil.which(config.whisper_cpp_binary) or config.whisper_cpp_binary
             if config.whisper_cpp_model is not None:
                 backend.model_path = str(config.whisper_cpp_model)
+        elif config.provider == "groq":
+            backend = GroqBackend()
+            backend.model_name = config.model or backend.model_name
+            if config.language and config.language != "auto":
+                backend.language = config.language
         elif config.provider in ("elevenlabs", "eleven-labs", "scribe"):
             backend = ElevenLabsBackend()
             backend.model_name = config.model or backend.model_name
@@ -197,6 +252,19 @@ def transcribe(audio_path: Path, config: SttConfig, vocabulary: str | None = Non
         return Transcription(text=backend.transcribe(audio_path, dictionary_terms=terms), provider=backend.name)
     except MurmurError as exc:
         raise SttError(exc.doctor()) from exc
+
+
+def _groq_api_key() -> str | None:
+    key = os.environ.get("MURMUR_GROQ_API_KEY") or os.environ.get("GROQ_API_KEY")
+    if key:
+        return key.strip()
+    key_file = Path(os.environ.get("MURMUR_GROQ_API_KEY_FILE", Path.home() / ".config" / "murmur" / "groq_api_key")).expanduser()
+    try:
+        if key_file.exists():
+            return key_file.read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    return None
 
 
 def _elevenlabs_api_key() -> str | None:
