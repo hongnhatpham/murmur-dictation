@@ -127,10 +127,18 @@ def copy_to_clipboard(text: str, tool: str = "wl-copy") -> None:
 def read_clipboard(tool: str = "wl-paste") -> str:
     if shutil.which(tool) is None:
         raise InsertionError(f"Missing `{tool}`. Install wl-clipboard.")
-    proc = subprocess.run([tool, "--no-newline"], text=True, capture_output=True)
+    try:
+        proc = subprocess.run(
+            [tool, "--no-newline", "--type", "text/plain"],
+            capture_output=True,
+            timeout=1,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise InsertionError(f"{tool} timed out") from exc
     if proc.returncode != 0:
-        raise InsertionError(proc.stderr.strip() or f"{tool} failed")
-    return proc.stdout
+        stderr = proc.stderr.decode("utf-8", errors="replace").strip()
+        raise InsertionError(stderr or f"{tool} failed")
+    return proc.stdout.decode("utf-8", errors="replace")
 
 
 def copy_selection_to_clipboard(config: InsertionConfig) -> bool:
@@ -288,7 +296,7 @@ def insert_text(
     if not injected_clipboard:
         try:
             previous_text = read_clipboard()
-        except InsertionError:
+        except Exception:
             previous_text = ""
         text = format_for_previous_text(text, previous_text, auto_leading_space=getattr(config, "auto_leading_space", True))
 
