@@ -196,7 +196,7 @@ def transcribe(audio_path: Path, config: SttConfig, vocabulary: str | None = Non
         terms = list(dictionary_terms or [])
         return Transcription(text=backend.transcribe(audio_path, dictionary_terms=terms), provider=backend.name)
     except MurmurError as exc:
-        raise SttError(str(exc)) from exc
+        raise SttError(exc.doctor()) from exc
 
 
 def _elevenlabs_api_key() -> str | None:
