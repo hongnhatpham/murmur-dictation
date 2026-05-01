@@ -117,6 +117,7 @@ class GroqBackend:
                 "Authorization": f"Bearer {self.api_key}",
                 "Content-Type": content_type,
                 "Accept": "application/json",
+                "User-Agent": "murmur-dictation/0.1",
             },
         )
         try:

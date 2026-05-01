@@ -132,7 +132,7 @@ def _correct_with_groq(
     req = urllib.request.Request(
         endpoint,
         data=payload,
-        headers={"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"},
+        headers={"Content-Type": "application/json", "Authorization": f"Bearer {api_key}", "User-Agent": "murmur-dictation/0.1"},
         method="POST",
     )
     try:
