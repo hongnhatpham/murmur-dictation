@@ -50,7 +50,7 @@ Default behavior:
 - clipboard tool: `wl-copy`
 - paste simulator preference: `wtype`, then `ydotool`
 - history: enabled
-- debug audio retention: disabled
+- debug audio retention: disabled; successfully transcribed temporary audio is removed automatically
 
 Generate a documented config with:
 
@@ -133,7 +133,7 @@ History is SQLite and stores text only:
 - insertion status
 - error message
 
-It does not store audio or secrets.
+It does not store audio or secrets. Captured audio lives under the debug audio cache only while needed for transcription, unless `--keep-audio` or `[privacy].keep_debug_audio = true` is enabled. Use `keep_audio_days` or `murmur cleanup-audio --keep-days N` to prune retained audio.
 
 Commands:
 
@@ -141,6 +141,7 @@ Commands:
 python -m murmur history --limit 20
 python -m murmur recopy-last
 python -m murmur last-transcript
+python -m murmur cleanup-audio --keep-days 0
 ```
 
 Disable history in private mode:

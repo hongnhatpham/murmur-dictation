@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .audio import record_audio
+from .audio_cleanup import cleanup_successful_audio, prune_audio_dir
 from .command import route_command_transform
 from .config import ensure_local_dirs, load_config, sample_config
 from .doctor import format_checks, has_required_failures, run_checks
@@ -72,6 +73,10 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("logs", help="print recent Murmur and hotkey debug logs")
     p.add_argument("--lines", type=int, default=80)
     p.set_defaults(func=cmd_logs)
+
+    p = sub.add_parser("cleanup-audio", help="remove cached Murmur audio files")
+    p.add_argument("--keep-days", type=int, default=None, help="override configured audio retention window")
+    p.set_defaults(func=cmd_cleanup_audio)
 
     p = sub.add_parser("dictate", help="record, transcribe, clean, and copy/paste")
     p.add_argument("--duration", type=float, default=5.0, help="fixed recording duration in seconds")
@@ -215,6 +220,26 @@ def cmd_logs(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_cleanup_audio(args: argparse.Namespace) -> int:
+    cfg = load_config()
+    ensure_local_dirs(cfg)
+    keep_days = cfg.privacy.keep_audio_days if args.keep_days is None else args.keep_days
+    result = prune_audio_dir(cfg.paths.debug_audio_dir, keep_days=keep_days)
+    print(f"removed={result.removed} freed_bytes={result.freed_bytes}")
+    return 0
+
+
+def _cleanup_processed_audio(cfg, audio_path: Path, *, keep_audio: bool) -> None:
+    result = cleanup_successful_audio(
+        audio_path,
+        audio_dir=cfg.paths.debug_audio_dir,
+        keep_audio=keep_audio,
+        keep_audio_days=cfg.privacy.keep_audio_days,
+    )
+    if result.removed:
+        debug_log(f"audio cleanup removed={result.removed} freed_bytes={result.freed_bytes}")
+
+
 def _process_audio(
     *,
     cfg,
@@ -303,15 +328,14 @@ def cmd_dictate(args: argparse.Namespace) -> int:
         rec_start = time.perf_counter()
         record_audio(audio_path, args.duration)
         duration_ms = int((time.perf_counter() - rec_start) * 1000)
-        return _process_audio(cfg=cfg, audio_path=audio_path, mode=mode, paste=args.paste, duration_ms=duration_ms, start=start)
+        rc = _process_audio(cfg=cfg, audio_path=audio_path, mode=mode, paste=args.paste, duration_ms=duration_ms, start=start)
+        if rc == 0:
+            _cleanup_processed_audio(cfg, audio_path, keep_audio=(args.keep_audio or cfg.privacy.keep_debug_audio))
+        return rc
     except MurmurError as exc:
         notify("Failed", str(exc))
         print(f"murmur: {exc.doctor()}", file=sys.stderr)
         return 1
-    finally:
-        keep_audio = args.keep_audio or cfg.privacy.keep_debug_audio
-        if audio_path and not args.audio and not keep_audio:
-            audio_path.unlink(missing_ok=True)
 
 
 def cmd_start_recording(args: argparse.Namespace) -> int:
@@ -375,11 +399,10 @@ def cmd_stop_recording(args: argparse.Namespace) -> int:
         paste = False if args.no_paste else (args.paste or session.paste)
         duration_ms = int((time.time() - session.started_at) * 1000)
         keep_audio = args.keep_audio or session.keep_audio or cfg.privacy.keep_debug_audio
-        try:
-            return _process_audio(cfg=cfg, audio_path=session.audio_path, mode=mode, paste=paste, duration_ms=duration_ms)
-        finally:
-            if not keep_audio:
-                session.audio_path.unlink(missing_ok=True)
+        rc = _process_audio(cfg=cfg, audio_path=session.audio_path, mode=mode, paste=paste, duration_ms=duration_ms)
+        if rc == 0:
+            _cleanup_processed_audio(cfg, session.audio_path, keep_audio=keep_audio)
+        return rc
     finally:
         release_lock(lock_path(cfg.paths.state_dir), fd)
 
@@ -523,8 +546,8 @@ def cmd_command(args: argparse.Namespace) -> int:
         return 1
     finally:
         keep_audio = args.keep_audio or cfg.privacy.keep_debug_audio
-        if audio_path and not args.audio and not keep_audio:
-            audio_path.unlink(missing_ok=True)
+        if audio_path and not args.audio and not keep_audio and transcript_text:
+            _cleanup_processed_audio(cfg, audio_path, keep_audio=keep_audio)
 
 
 def cmd_copy(args: argparse.Namespace) -> int:
