@@ -19,6 +19,7 @@ from .history import HistoryStore, format_entries
 from .insertion import InsertionError, copy_selection_to_clipboard, copy_to_clipboard, insert_text, read_clipboard
 from .notify import notify
 from .personal import PersonalStore, format_snippets, format_terms
+from .styles import apply_style, style_for_category
 from .session import (
     acquire_lock,
     clear_session,
@@ -277,13 +278,16 @@ def _process_audio(
             snippets=snippets,
         )
         app_context = current_app_context(cfg.context)
+        style = style_for_category(app_context.category, cfg.styles)
+        styled_text = apply_style(transformed.final_text, style)
         correction = correct_text(
             raw_transcript=transcript_text,
-            deterministic_text=transformed.final_text,
+            deterministic_text=styled_text,
             mode=mode,
             config=cfg.correction,
             app_context=app_context,
             dictionary_terms=terms,
+            style=style.settings,
         )
         final_text = correction.final_text
         result = insert_text(final_text, transformed.actions, cfg.insertion, paste=paste)
@@ -293,13 +297,14 @@ def _process_audio(
                 mode=mode,
                 provider=provider,
                 transcript=transcript_text,
-                deterministic_text=transformed.final_text,
+                deterministic_text=styled_text,
                 final_text=final_text,
                 correction_provider=correction.provider,
                 correction_status=correction.status,
                 correction_latency_ms=correction.latency_ms,
                 focused_app_id=app_context.focused_app_id,
                 app_category=app_context.category,
+                style_applied=style.name,
                 actions=transformed.actions,
                 insertion_status=result.status,
                 audio_duration_ms=duration_ms,
@@ -490,22 +495,25 @@ def _cmd_insert_text(args: argparse.Namespace, *, paste: bool) -> int:
         snippets=personal.snippet_map(),
     )
     app_context = current_app_context(cfg.context)
-    result = insert_text(transformed.final_text, transformed.actions, cfg.insertion, paste=paste)
+    style = style_for_category(app_context.category, cfg.styles)
+    final_text = apply_style(transformed.final_text, style)
+    result = insert_text(final_text, transformed.actions, cfg.insertion, paste=paste)
     if cfg.privacy.history and not args.private:
         HistoryStore(cfg.paths.history_path).add(
             mode=mode,
             provider="manual",
             transcript=transcript_text,
-            deterministic_text=transformed.final_text,
-            final_text=transformed.final_text,
+            deterministic_text=final_text,
+            final_text=final_text,
             correction_provider="deterministic",
             correction_status="skipped",
             focused_app_id=app_context.focused_app_id,
             app_category=app_context.category,
+            style_applied=style.name,
             actions=transformed.actions,
             insertion_status=result.status,
         )
-    print(transformed.final_text)
+    print(final_text)
     print(f"[{result.status}] {result.message}", file=sys.stderr)
     return 0
 
@@ -558,23 +566,26 @@ def cmd_command(args: argparse.Namespace) -> int:
             return 2
 
         app_context = current_app_context(cfg.context)
-        result = insert_text(routed.final_text, [], cfg.insertion, paste=(args.paste or args.selection))
+        style = style_for_category(app_context.category, cfg.styles)
+        final_text = apply_style(routed.final_text, style)
+        result = insert_text(final_text, [], cfg.insertion, paste=(args.paste or args.selection))
         if cfg.privacy.history:
             HistoryStore(cfg.paths.history_path).add(
                 mode=f"command:{routed.command}",
                 provider=provider,
                 transcript=transcript_text,
-                deterministic_text=routed.final_text,
-                final_text=routed.final_text,
+                deterministic_text=final_text,
+                final_text=final_text,
                 correction_provider="deterministic",
                 correction_status="skipped",
                 focused_app_id=app_context.focused_app_id,
                 app_category=app_context.category,
+                style_applied=style.name,
                 actions=[],
                 insertion_status=result.status,
             )
         notify("Command applied" if result.status == "pasted" else "Command copied", result.message)
-        print(routed.final_text)
+        print(final_text)
         print(f"[{result.status}] {result.message}", file=sys.stderr)
         return 0
     except (MurmurError, SttError, InsertionError) as exc:

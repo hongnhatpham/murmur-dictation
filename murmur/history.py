@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS dictations (
     correction_latency_ms INTEGER,
     focused_app_id TEXT,
     app_category TEXT,
+    style_applied TEXT,
     actions TEXT NOT NULL DEFAULT '',
     insertion_status TEXT NOT NULL DEFAULT 'unknown',
     audio_duration_ms INTEGER,
@@ -50,6 +51,7 @@ class HistoryEntry:
     correction_latency_ms: int | None = None
     focused_app_id: str | None = None
     app_category: str | None = None
+    style_applied: str | None = None
 
 
 @dataclass(frozen=True)
@@ -119,6 +121,7 @@ class HistoryStore:
         correction_latency_ms: int | None = None,
         focused_app_id: str | None = None,
         app_category: str | None = None,
+        style_applied: str | None = None,
     ) -> int:
         timestamp = created_at or datetime.now(timezone.utc).isoformat(timespec="seconds")
         action_text = ",".join(getattr(a, "name", str(a)) for a in (actions or []))
@@ -127,8 +130,8 @@ class HistoryStore:
             cur = conn.execute(
                 """
                 INSERT INTO dictations
-                (created_at, mode, provider, transcript, deterministic_text, final_text, correction_provider, correction_status, correction_latency_ms, focused_app_id, app_category, actions, insertion_status, audio_duration_ms, latency_ms, error_message)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (created_at, mode, provider, transcript, deterministic_text, final_text, correction_provider, correction_status, correction_latency_ms, focused_app_id, app_category, style_applied, actions, insertion_status, audio_duration_ms, latency_ms, error_message)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     timestamp,
@@ -142,6 +145,7 @@ class HistoryStore:
                     correction_latency_ms,
                     focused_app_id,
                     app_category,
+                    style_applied,
                     action_text,
                     insertion_status,
                     audio_duration_ms,
@@ -159,7 +163,7 @@ class HistoryStore:
         try:
             rows = conn.execute(
                 """
-                SELECT id, created_at, mode, provider, transcript, deterministic_text, final_text, correction_provider, correction_status, correction_latency_ms, focused_app_id, app_category, insertion_status, error_message
+                SELECT id, created_at, mode, provider, transcript, deterministic_text, final_text, correction_provider, correction_status, correction_latency_ms, focused_app_id, app_category, style_applied, insertion_status, error_message
                 FROM dictations
                 ORDER BY id DESC
                 LIMIT ?
@@ -187,6 +191,7 @@ def _ensure_columns(conn: sqlite3.Connection) -> None:
         "correction_latency_ms": "ALTER TABLE dictations ADD COLUMN correction_latency_ms INTEGER",
         "focused_app_id": "ALTER TABLE dictations ADD COLUMN focused_app_id TEXT",
         "app_category": "ALTER TABLE dictations ADD COLUMN app_category TEXT",
+        "style_applied": "ALTER TABLE dictations ADD COLUMN style_applied TEXT",
     }.items():
         if name not in existing:
             conn.execute(ddl)
@@ -208,6 +213,7 @@ def _entry(row: sqlite3.Row) -> HistoryEntry:
         correction_latency_ms=row["correction_latency_ms"],
         focused_app_id=row["focused_app_id"],
         app_category=row["app_category"],
+        style_applied=row["style_applied"],
     )
 
 

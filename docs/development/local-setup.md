@@ -115,6 +115,20 @@ timeout_seconds = 2.5
 
 If correction times out or fails, Murmur falls back to the deterministic cleaned text instead of losing the dictation. Raw mode bypasses AI correction unless `[correction].raw_mode = true`.
 
+Per-app categories can also apply Flow-style presets before the optional AI pass:
+
+```toml
+[styles.presets.personal_message]
+trailing_period = false
+rewrite_aggressiveness = "light"
+formality = "casual"
+
+[styles.presets.email]
+trailing_period = true
+rewrite_aggressiveness = "medium"
+formality = "formal"
+```
+
 ## Personal dictionary and snippets
 
 Personal vocabulary and snippets are stored locally in SQLite at `<state directory>/personal.sqlite3` unless `paths.personal_db` is set in config.

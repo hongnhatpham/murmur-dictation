@@ -337,10 +337,10 @@ Add app/category-aware dictation behavior and text snippets after the core loop 
 #### Acceptance criteria
 
 - [ ] Murmur can detect or accept the active app/category for transform context.
-- [ ] Config supports style presets for chat, email, docs, code, and terminal-like contexts.
+- [x] Config supports style presets for chat, email, docs, code, and terminal-like contexts.
 - [x] Snippets can be added, listed, removed, and expanded.
 - [x] Snippets and styles are stored locally.
-- [ ] Clean mode output changes appropriately by category without becoming unpredictable.
+- [x] Clean mode output changes appropriately by category without becoming unpredictable.
 
 #### Implementation notes
 
@@ -495,11 +495,11 @@ Add per-category style presets that shape deterministic cleanup and AI correctio
 
 #### Acceptance criteria
 
-- [ ] Config supports style presets by category.
-- [ ] Style controls punctuation density, trailing period policy, casing, and rewrite aggressiveness.
-- [ ] Terminal/code style disables aggressive prose rewriting.
-- [ ] Email/doc style favors complete sentences and formal punctuation.
-- [ ] History records which style was applied.
+- [x] Config supports style presets by category.
+- [x] Style controls punctuation density, trailing period policy, casing, and rewrite aggressiveness.
+- [x] Terminal/code style disables aggressive prose rewriting.
+- [x] Email/doc style favors complete sentences and formal punctuation.
+- [x] History records which style was applied.
 
 #### Implementation notes
 

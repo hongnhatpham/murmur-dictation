@@ -5,7 +5,7 @@ import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
-from typing import Iterable
+from typing import Any, Iterable
 
 from .config import CorrectionConfig
 from .context import AppContext
@@ -28,6 +28,7 @@ def correct_text(
     config: CorrectionConfig,
     app_context: AppContext,
     dictionary_terms: Iterable[str] = (),
+    style: dict[str, Any] | None = None,
 ) -> CorrectionResult:
     if not config.enabled:
         return CorrectionResult(deterministic_text, provider="deterministic", status="skipped")
@@ -44,6 +45,7 @@ def correct_text(
             config=config,
             app_context=app_context,
             dictionary_terms=dictionary_terms,
+            style=style or {},
         )
     except Exception as exc:
         latency_ms = int((time.perf_counter() - start) * 1000)
@@ -61,12 +63,14 @@ def _correct_with_ollama(
     config: CorrectionConfig,
     app_context: AppContext,
     dictionary_terms: Iterable[str],
+    style: dict[str, Any],
 ) -> str:
     prompt = _build_prompt(
         raw_transcript=raw_transcript,
         deterministic_text=deterministic_text,
         app_context=app_context,
         dictionary_terms=dictionary_terms,
+        style=style,
     )
     payload = json.dumps({"model": config.model, "prompt": prompt, "stream": False}).encode("utf-8")
     req = urllib.request.Request(config.endpoint, data=payload, headers={"Content-Type": "application/json"}, method="POST")
@@ -82,8 +86,10 @@ def _build_prompt(
     deterministic_text: str,
     app_context: AppContext,
     dictionary_terms: Iterable[str],
+    style: dict[str, Any],
 ) -> str:
     terms = ", ".join(sorted(set(term.strip() for term in dictionary_terms if term.strip())))
+    style_text = ", ".join(f"{key}={value}" for key, value in sorted(style.items())) or "default"
     return f"""You are the correction layer for a dictation input method.
 Return only JSON: {{"text":"..."}}
 
@@ -93,6 +99,7 @@ Rules:
 - Remove obvious filler words and speech artifacts.
 - Fix punctuation, casing, and grammar lightly.
 - Respect app category: {app_context.category}.
+- Respect style settings: {style_text}.
 - Be conservative for terminal/code categories.
 - Keep personal vocabulary spelling/casing when relevant: {terms or "(none)"}.
 

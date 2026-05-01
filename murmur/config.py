@@ -87,6 +87,19 @@ class InsertionConfig:
 
 
 @dataclass(frozen=True)
+class StyleConfig:
+    presets: dict[str, dict[str, Any]] = field(default_factory=lambda: {
+        "terminal": {"trailing_period": False, "rewrite_aggressiveness": "literal", "formality": "literal"},
+        "code": {"trailing_period": False, "rewrite_aggressiveness": "literal", "formality": "literal"},
+        "personal_message": {"trailing_period": False, "rewrite_aggressiveness": "light", "formality": "casual"},
+        "work_message": {"trailing_period": False, "rewrite_aggressiveness": "light", "formality": "casual-professional"},
+        "email": {"trailing_period": True, "rewrite_aggressiveness": "medium", "formality": "formal"},
+        "docs": {"trailing_period": True, "rewrite_aggressiveness": "medium", "formality": "clear"},
+        "other": {"trailing_period": True, "rewrite_aggressiveness": "light", "formality": "neutral"},
+    })
+
+
+@dataclass(frozen=True)
 class CorrectionConfig:
     enabled: bool = False
     provider: str = "ollama"
@@ -138,6 +151,7 @@ class MurmurConfig:
     paths: PathsConfig = field(default_factory=PathsConfig)
     stt: SttConfig = field(default_factory=SttConfig)
     cleanup: CleanupConfig = field(default_factory=CleanupConfig)
+    styles: StyleConfig = field(default_factory=StyleConfig)
     correction: CorrectionConfig = field(default_factory=CorrectionConfig)
     command: CommandConfig = field(default_factory=CommandConfig)
     insertion: InsertionConfig = field(default_factory=InsertionConfig)
@@ -176,6 +190,18 @@ def _merge_stt(data: dict[str, Any]) -> SttConfig:
 def _merge_cleanup(data: dict[str, Any]) -> CleanupConfig:
     defaults = CleanupConfig()
     return CleanupConfig(default_mode=str(data.get("default_mode", defaults.default_mode)))
+
+
+def _merge_styles(data: dict[str, Any]) -> StyleConfig:
+    defaults = StyleConfig()
+    raw = data.get("presets", defaults.presets)
+    if not isinstance(raw, dict):
+        raw = defaults.presets
+    presets: dict[str, dict[str, Any]] = {}
+    for category, style in raw.items():
+        if isinstance(style, dict):
+            presets[str(category)] = {str(key): value for key, value in style.items()}
+    return StyleConfig(presets=presets or defaults.presets)
 
 
 def _merge_correction(data: dict[str, Any]) -> CorrectionConfig:
@@ -239,6 +265,7 @@ def load_config(path: str | Path | None = None) -> MurmurConfig:
         paths=_merge_paths(raw.get("paths", {})),
         stt=_merge_stt(raw.get("stt", {})),
         cleanup=_merge_cleanup(raw.get("cleanup", {})),
+        styles=_merge_styles(raw.get("styles", {})),
         correction=_merge_correction(raw.get("correction", {})),
         command=_merge_command(raw.get("command", {})),
         insertion=_merge_insertion(raw.get("insertion", {})),
@@ -277,6 +304,13 @@ language = "{defaults.stt.language}"
 
 [cleanup]
 default_mode = "{defaults.cleanup.default_mode}" # "clean" or "raw"
+
+[styles]
+# Optional per-category style overrides.
+# [styles.presets.personal_message]
+# trailing_period = false
+# rewrite_aggressiveness = "light"
+# formality = "casual"
 
 [correction]
 # Optional local LLM cleanup. Disabled by default until latency/quality is proven.
