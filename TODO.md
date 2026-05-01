@@ -368,3 +368,139 @@ For longer dictations, allow a conservative initial insertion and an optional ba
 #### Implementation notes
 
 - This is V2. Do not build until the core insertion and overlay are stable.
+
+### 16. Add correction trace fields to history
+
+- Type: AFK
+- Blocked by: 7. Add configurable providers and modes
+- User stories covered: Recover raw transcript; understand whether correction helped or hurt
+
+#### What to build
+
+Extend the dictation pipeline and history records so every insertion can show the raw transcript, deterministic cleaned text, final corrected text, correction provider, correction latency, and fallback reason.
+
+#### Acceptance criteria
+
+- [ ] History distinguishes raw transcript, deterministic cleaned text, and final insertion text.
+- [ ] History records `correction_provider`, `correction_latency_ms`, and `correction_status`.
+- [ ] `murmur history` and recovery commands remain useful and concise.
+- [ ] Failed correction never loses raw transcript or deterministic text.
+
+#### Implementation notes
+
+- Source: `docs/product/ai-correction-prd.md`.
+- This is the tracer bullet for making AI correction observable before making it smart.
+
+### 17. Add focused-app category detection for correction context
+
+- Type: AFK
+- Blocked by: 16. Add correction trace fields to history
+- User stories covered: App-aware correction; terminal/code safety
+
+#### What to build
+
+Map the focused app/window to a Murmur category such as terminal/code, AI chat/docs, work messaging, personal messaging, email, or other. Feed this category into deterministic cleanup and future correction prompts.
+
+#### Acceptance criteria
+
+- [ ] Murmur detects focused niri app ID where available.
+- [ ] Config maps app IDs or URL/app hints to categories.
+- [ ] Terminal/code contexts are classified conservatively.
+- [ ] History records the detected app ID and category.
+- [ ] Missing app data falls back to `other` without failing dictation.
+
+#### Implementation notes
+
+- Reuse the existing focused-window detection added for terminal insertion.
+- Keep browser URL/context as a later extension.
+
+### 18. Implement Wispr-style spacing and continuation context
+
+- Type: AFK
+- Blocked by: 17. Add focused-app category detection for correction context
+- User stories covered: Dictating subsequent sentences; context-aware formatting
+
+#### What to build
+
+Improve cursor-adjacent formatting: leading spaces, lowercase continuation, punctuation joining, and trailing period policy based on app category and nearby text.
+
+#### Acceptance criteria
+
+- [ ] Subsequent dictations insert a leading space when continuing prose.
+- [ ] Mid-sentence continuation can lowercase the first word when appropriate.
+- [ ] Punctuation-leading text does not receive an extra leading space.
+- [ ] Messaging categories can omit trailing periods when configured.
+- [ ] Unit tests cover continuation, punctuation, empty context, and terminal/code contexts.
+
+#### Implementation notes
+
+- The current clipboard-based leading-space behavior is a first draft; harden it into a context module.
+
+### 19. Extend personal dictionary into correction vocabulary rules
+
+- Type: AFK
+- Blocked by: 16. Add correction trace fields to history; 8. Add personal dictionary support
+- User stories covered: Personal vocabulary; project names; replacement rules
+
+#### What to build
+
+Upgrade the dictionary from simple term storage to correction-aware vocabulary: preferred casing, replacement rules, category-specific terms, and likely-miss review from history.
+
+#### Acceptance criteria
+
+- [ ] Dictionary entries can include preferred casing and optional replacement text.
+- [ ] Correction prompts and deterministic cleanup receive relevant dictionary entries.
+- [ ] History can surface likely misses for review.
+- [ ] CLI supports add/list/remove for the expanded fields.
+- [ ] Existing dictionary data migrates or remains compatible.
+
+#### Implementation notes
+
+- Keep data local in SQLite.
+- Avoid logging private dictionary notes beyond what is needed for debugging.
+
+### 20. Add local AI correction provider
+
+- Type: AFK
+- Blocked by: 16. Add correction trace fields to history; 17. Add focused-app category detection for correction context; 19. Extend personal dictionary into correction vocabulary rules
+- User stories covered: AI correction; filler removal; punctuation restoration; preserve meaning
+
+#### What to build
+
+Add an optional local LLM correction pass after deterministic cleanup. Start with an Ollama-compatible HTTP provider and strict JSON/plain-text output contract.
+
+#### Acceptance criteria
+
+- [ ] Config can enable/disable AI correction independently of STT.
+- [ ] Correction receives raw transcript, deterministic text, category/style, and dictionary terms.
+- [ ] Prompt instructs the model to preserve meaning, avoid adding facts, and return only insertion text plus metadata.
+- [ ] Correction has a timeout and falls back to deterministic text on failure.
+- [ ] Raw mode bypasses AI correction unless explicitly requested.
+- [ ] Unit tests cover timeout/fallback and response parsing.
+
+#### Implementation notes
+
+- Default remains off until latency/quality is proven.
+- Prefer local Ollama first; cloud adapters are opt-in future work.
+
+### 21. Add configurable Flow-style app styles
+
+- Type: AFK
+- Blocked by: 17. Add focused-app category detection for correction context; 20. Add local AI correction provider
+- User stories covered: Email formal style; chat casual style; terminal/code literal style
+
+#### What to build
+
+Add per-category style presets that shape deterministic cleanup and AI correction: formal, casual, very casual, code/terminal literal, and custom.
+
+#### Acceptance criteria
+
+- [ ] Config supports style presets by category.
+- [ ] Style controls punctuation density, trailing period policy, casing, and rewrite aggressiveness.
+- [ ] Terminal/code style disables aggressive prose rewriting.
+- [ ] Email/doc style favors complete sentences and formal punctuation.
+- [ ] History records which style was applied.
+
+#### Implementation notes
+
+- Match Wispr Flow's product shape but keep the implementation local-first and transparent.
