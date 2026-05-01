@@ -3,6 +3,8 @@ from __future__ import annotations
 import argparse
 import sys
 import time
+import traceback
+from datetime import datetime, timezone
 from pathlib import Path
 
 from .audio import record_audio
@@ -27,14 +29,33 @@ from .stt import SttError, transcribe
 from .transform import transform_transcript
 
 
+def debug_log(message: str) -> None:
+    try:
+        log_path = Path.home() / ".local/state/murmur/murmur.log"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        with log_path.open("a", encoding="utf-8") as fh:
+            fh.write(f"[{stamp}] {message}\n")
+    except Exception:
+        pass
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    debug_log("argv=" + " ".join(sys.argv[1:] if argv is None else argv))
     try:
-        return args.func(args)
+        rc = args.func(args)
+        debug_log(f"exit rc={rc}")
+        return rc
     except KeyboardInterrupt:
+        debug_log("keyboard interrupt")
         print("Canceled", file=sys.stderr)
         return 130
+    except Exception:
+        debug_log("unhandled exception:\n" + traceback.format_exc())
+        print("murmur: unexpected failure; see ~/.local/state/murmur/murmur.log", file=sys.stderr)
+        return 1
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -47,6 +68,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("doctor", help="check local dependencies and config")
     p.set_defaults(func=cmd_doctor)
+
+    p = sub.add_parser("logs", help="print recent Murmur and hotkey debug logs")
+    p.add_argument("--lines", type=int, default=80)
+    p.set_defaults(func=cmd_logs)
 
     p = sub.add_parser("dictate", help="record, transcribe, clean, and copy/paste")
     p.add_argument("--duration", type=float, default=5.0, help="fixed recording duration in seconds")
@@ -68,6 +93,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-paste", action="store_true", help="override a start-recording --paste session")
     p.add_argument("--keep-audio", action="store_true", help="keep captured audio after processing")
     p.set_defaults(func=cmd_stop_recording)
+
+    p = sub.add_parser("toggle-recording", help="start recording, or stop and process if already recording")
+    p.add_argument("--mode", choices=["clean", "raw"], default=None)
+    p.add_argument("--paste", action="store_true", help="paste on stop after copying")
+    p.add_argument("--keep-audio", action="store_true", help="keep captured audio after processing")
+    p.set_defaults(func=cmd_toggle_recording)
 
     p = sub.add_parser("cancel-recording", help="cancel a held-key recording session without insertion")
     p.set_defaults(func=cmd_cancel_recording)
@@ -160,6 +191,30 @@ def cmd_doctor(_args: argparse.Namespace) -> int:
     return 1 if has_required_failures(checks) else 0
 
 
+def _tail(path: Path, lines: int) -> str:
+    if not path.exists():
+        return "(missing)"
+    data = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    return "\n".join(data[-lines:]) if data else "(empty)"
+
+
+def cmd_logs(args: argparse.Namespace) -> int:
+    cfg = load_config()
+    ensure_local_dirs(cfg)
+    paths = [
+        cfg.paths.state_dir / "murmur.log",
+        cfg.paths.state_dir / "hotkey-evdev.log",
+        cfg.paths.state_dir / "swhkd-actions.log",
+        cfg.paths.state_dir / "recording-session.log",
+        cfg.paths.state_dir / "recording-session.json",
+        cfg.paths.state_dir / "recording-session.lock",
+    ]
+    for path in paths:
+        print(f"\n== {path} ==")
+        print(_tail(path, args.lines))
+    return 0
+
+
 def _process_audio(
     *,
     cfg,
@@ -213,6 +268,7 @@ def _process_audio(
         print(f"[{result.status}] {result.message} latency_ms={latency_ms}", file=sys.stderr)
         return 0
     except (MurmurError, SttError, InsertionError) as exc:
+        debug_log(f"process_audio failed: {exc!r}")
         if cfg.privacy.history:
             store.add(
                 mode=mode,
@@ -276,6 +332,11 @@ def cmd_start_recording(args: argparse.Namespace) -> int:
             keep_audio=args.keep_audio,
         )
     except MurmurError as exc:
+        debug_log(f"start-recording failed: {exc.doctor()}")
+        if str(exc) == "Recording already in progress.":
+            # swhkd can repeat the press binding while Super+Space is held.
+            # Repeated starts are expected in hold-to-record mode; ignore them.
+            return 0
         notify("Failed", str(exc))
         print(f"murmur: {exc.doctor()}", file=sys.stderr)
         return 1
@@ -301,6 +362,11 @@ def cmd_stop_recording(args: argparse.Namespace) -> int:
             stop_recording_process(session)
             clear_session(cfg.paths.state_dir)
         except MurmurError as exc:
+            debug_log(f"stop-recording failed before processing: {exc.doctor()}")
+            if str(exc) in {"No recording in progress.", "Recording process is not running."}:
+                # Release hotkeys can fire more than once after a successful stop.
+                # Treat stale/no-session stops as no-ops to avoid false failure notifications.
+                return 0
             notify("Failed", str(exc))
             print(f"murmur: {exc.doctor()}", file=sys.stderr)
             return 1
@@ -318,6 +384,27 @@ def cmd_stop_recording(args: argparse.Namespace) -> int:
         release_lock(lock_path(cfg.paths.state_dir), fd)
 
 
+def load_active_session_or_none(state_dir: Path):
+    try:
+        return load_active_session(state_dir)
+    except MurmurError:
+        return None
+
+
+def cmd_toggle_recording(args: argparse.Namespace) -> int:
+    cfg = load_config()
+    ensure_local_dirs(cfg)
+    if load_active_session_or_none(cfg.paths.state_dir) is None:
+        return cmd_start_recording(args)
+    stop_args = argparse.Namespace(
+        mode=args.mode,
+        paste=args.paste,
+        no_paste=False,
+        keep_audio=args.keep_audio,
+    )
+    return cmd_stop_recording(stop_args)
+
+
 def cmd_cancel_recording(_args: argparse.Namespace) -> int:
     cfg = load_config()
     ensure_local_dirs(cfg)
@@ -333,6 +420,10 @@ def cmd_cancel_recording(_args: argparse.Namespace) -> int:
         clear_session(cfg.paths.state_dir)
         session.audio_path.unlink(missing_ok=True)
     except MurmurError as exc:
+        debug_log(f"cancel-recording failed: {exc.doctor()}")
+        if str(exc) in {"No recording in progress.", "Recording process is not running."}:
+            # Escape may repeat while the temporary swhkd mode is already cleared.
+            return 0
         notify("Failed", str(exc))
         print(f"murmur: {exc.doctor()}", file=sys.stderr)
         return 1

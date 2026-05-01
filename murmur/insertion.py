@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 import time
@@ -41,9 +42,19 @@ class WlClipboard:
     def copy(self, text: str) -> None:
         if shutil.which(self.tool) is None:
             raise InsertionError(f"Missing `{self.tool}`. Install wl-clipboard.")
-        proc = subprocess.run([self.tool], input=text, text=True, capture_output=True)
+        try:
+            proc = subprocess.run(
+                [self.tool],
+                input=text,
+                text=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=3,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise InsertionError(f"{self.tool} timed out") from exc
         if proc.returncode != 0:
-            raise InsertionError(proc.stderr.strip() or f"{self.tool} failed")
+            raise InsertionError(f"{self.tool} failed")
 
 
 class ToolSimulator:
@@ -53,15 +64,40 @@ class ToolSimulator:
     def available(self) -> bool:
         return shutil.which(self.name) is not None
 
-    def paste(self) -> None:
+    def paste(self, *, terminal: bool = False) -> None:
         if self.name == "wtype":
-            proc = subprocess.run(["wtype", "-M", "ctrl", "-P", "v", "-p", "v", "-m", "ctrl"], capture_output=True, text=True)
+            if terminal:
+                proc = subprocess.run(["wtype", "-M", "ctrl", "-M", "shift", "-k", "v", "-m", "shift", "-m", "ctrl"], capture_output=True, text=True)
+            else:
+                proc = subprocess.run(["wtype", "-M", "ctrl", "-k", "v", "-m", "ctrl"], capture_output=True, text=True)
         elif self.name == "ydotool":
-            proc = subprocess.run(["ydotool", "key", "29:1", "47:1", "47:0", "29:0"], capture_output=True, text=True)
+            if terminal:
+                proc = subprocess.run(["ydotool", "key", "29:1", "42:1", "47:1", "47:0", "42:0", "29:0"], capture_output=True, text=True)
+            else:
+                proc = subprocess.run(["ydotool", "key", "29:1", "47:1", "47:0", "29:0"], capture_output=True, text=True)
         else:
             raise InsertionError(f"Unsupported paste simulator: {self.name}")
         if proc.returncode != 0:
             raise InsertionError(proc.stderr.strip() or f"{self.name} paste failed")
+
+    def type_text(self, text: str) -> None:
+        if self.name == "wtype":
+            proc = subprocess.run(["wtype", "-"], input=text, text=True, capture_output=True)
+        elif self.name == "ydotool":
+            raise InsertionError("ydotool direct text insertion is not supported")
+        else:
+            raise InsertionError(f"Unsupported text simulator: {self.name}")
+        if proc.returncode != 0:
+            raise InsertionError(proc.stderr.strip() or f"{self.name} text insertion failed")
+
+    def release_modifiers(self) -> None:
+        if self.name == "wtype":
+            # Defensive cleanup for virtual-keyboard state. Some terminal/compositor
+            # combinations can behave as if a modifier is still held after synthetic
+            # paste unless we explicitly release common modifiers.
+            subprocess.run(["wtype", "-m", "ctrl", "-m", "shift", "-m", "alt", "-m", "logo", "-m", "win"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        elif self.name == "ydotool":
+            subprocess.run(["ydotool", "key", "29:0", "42:0", "56:0", "125:0", "126:0"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     def press_enter(self) -> None:
         if self.name == "wtype":
@@ -135,12 +171,77 @@ def _first_available_simulator(config: InsertionConfig) -> ToolSimulator | None:
     return None
 
 
+def focused_window() -> dict | None:
+    if shutil.which("niri") is None:
+        return None
+    try:
+        proc = subprocess.run(["niri", "msg", "-j", "focused-window"], capture_output=True, text=True, timeout=1)
+    except Exception:
+        return None
+    if proc.returncode != 0 or not proc.stdout.strip():
+        return None
+    try:
+        data = json.loads(proc.stdout)
+    except json.JSONDecodeError:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def focused_app_id(window: dict | None = None) -> str | None:
+    data = window if window is not None else focused_window()
+    if not data:
+        return None
+    app_id = data.get("app_id")
+    return str(app_id) if app_id else None
+
+
+def is_terminal_focused(config: InsertionConfig, window: dict | None = None) -> bool:
+    app_id = focused_app_id(window)
+    if not app_id:
+        return False
+    return app_id in set(config.terminal_app_ids)
+
+
+def should_prepend_space(text: str, config: InsertionConfig) -> bool:
+    if not text or not getattr(config, "auto_leading_space", True):
+        return False
+    no_space_before = set(",.;:!?)]}%\"'”’")
+    if text[0].isspace() or text[0] in no_space_before:
+        return False
+    try:
+        existing = read_clipboard()
+    except InsertionError:
+        return False
+    if not existing:
+        return False
+    last = existing[-1]
+    if last.isspace() or last in "([{/$#@\n\t":
+        return False
+    return True
+
+
+def refresh_niri_focus(window: dict | None) -> None:
+    """Work around occasional niri/terminal input stalls after virtual keyboard insertion."""
+    if shutil.which("niri") is None or not window or "id" not in window:
+        return
+    window_id = str(window["id"])
+    try:
+        subprocess.run(["niri", "msg", "action", "focus-window-previous"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.5)
+        time.sleep(0.03)
+        subprocess.run(["niri", "msg", "action", "focus-window", "--id", window_id], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.5)
+    except Exception:
+        return
+
+
 def paste_from_clipboard(config: InsertionConfig) -> bool:
     simulator = _first_available_simulator(config)
     if simulator is None:
         return False
     try:
-        simulator.paste()
+        window = focused_window()
+        simulator.paste(terminal=is_terminal_focused(config, window))
+        if is_terminal_focused(config, window):
+            refresh_niri_focus(window)
         return True
     except InsertionError:
         return False
@@ -171,6 +272,9 @@ def insert_text(
     clipboard = clipboard or WlClipboard(config.clipboard_tool)
     simulator = simulator or _first_available_simulator(config)
 
+    if clipboard is None and should_prepend_space(text, config):
+        text = " " + text
+
     if text:
         clipboard.copy(text)
     if not paste:
@@ -186,13 +290,29 @@ def insert_text(
     paste_attempted = False
     enter_sent = False
     try:
-        if text:
-            paste_attempted = True
-            simulator.paste()
-            time.sleep(0.08)
-        if _has_enter_action(actions):
-            simulator.press_enter()
-            enter_sent = True
+        window = focused_window()
+        terminal = is_terminal_focused(config, window)
+        try:
+            if text:
+                paste_attempted = True
+                if isinstance(simulator, ToolSimulator):
+                    if terminal and simulator.name == "wtype":
+                        # Terminals are sensitive to synthetic paste modifiers.
+                        # Type text directly, then nudge niri focus to restore input.
+                        simulator.type_text(text)
+                    else:
+                        simulator.paste(terminal=terminal)
+                else:
+                    simulator.paste()
+                time.sleep(0.08)
+            if _has_enter_action(actions):
+                simulator.press_enter()
+                enter_sent = True
+        finally:
+            if isinstance(simulator, ToolSimulator):
+                simulator.release_modifiers()
+            if terminal:
+                refresh_niri_focus(window)
     except InsertionError as exc:
         return InsertionResult(status="copied-only", message=f"Copied to clipboard; paste failed: {exc}", paste_attempted=paste_attempted)
 

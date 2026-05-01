@@ -15,6 +15,7 @@ from .errors import MurmurError
 
 SESSION_FILENAME = "recording-session.json"
 LOCK_FILENAME = "recording-session.lock"
+METER_SCRIPT = Path("/mnt/storage/01 Projects/murmur-dictation/scripts/murmur-meter-state")
 
 
 @dataclass(frozen=True)
@@ -25,6 +26,7 @@ class RecordingSession:
     mode: str | None = None
     paste: bool = False
     keep_audio: bool = False
+    meter_pid: int | None = None
 
     def to_json(self) -> str:
         return json.dumps({**asdict(self), "audio_path": str(self.audio_path)}, indent=2, sort_keys=True)
@@ -46,6 +48,7 @@ def session_from_dict(data: dict[str, Any]) -> RecordingSession:
         mode=None if data.get("mode") in (None, "") else str(data.get("mode")),
         paste=bool(data.get("paste", False)),
         keep_audio=bool(data.get("keep_audio", False)),
+        meter_pid=int(data["meter_pid"]) if data.get("meter_pid") else None,
     )
 
 
@@ -148,7 +151,18 @@ def start_recording_session(
         proc = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
     finally:
         log.close()
-    session = RecordingSession(proc.pid, audio_path, time.time(), mode=mode, paste=paste, keep_audio=keep_audio)
+    meter_pid = None
+    if METER_SCRIPT.exists():
+        try:
+            meter_log = (state_dir / "meter.log").open("ab")
+            try:
+                meter = subprocess.Popen([str(METER_SCRIPT), str(audio_path)], stdout=meter_log, stderr=subprocess.STDOUT, start_new_session=True)
+                meter_pid = meter.pid
+            finally:
+                meter_log.close()
+        except OSError:
+            meter_pid = None
+    session = RecordingSession(proc.pid, audio_path, time.time(), mode=mode, paste=paste, keep_audio=keep_audio, meter_pid=meter_pid)
     path = session_path(state_dir)
     path.write_text(session.to_json(), encoding="utf-8")
     path.chmod(0o600)
@@ -174,6 +188,13 @@ def stop_recording_process(session: RecordingSession, *, timeout: float = 5.0, v
                 time.sleep(0.05)
     if process_alive(session.pid):
         raise MurmurError("Recorder did not stop cleanly.", f"Manual cleanup may be required for pid {session.pid}.")
+    if session.meter_pid and process_alive(session.meter_pid):
+        try:
+            os.killpg(session.meter_pid, signal.SIGINT)
+        except ProcessLookupError:
+            pass
+    if METER_SCRIPT.exists():
+        subprocess.run([str(METER_SCRIPT)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
     if validate_audio and (not session.audio_path.exists() or session.audio_path.stat().st_size == 0):
         raise MurmurError("Recording produced no audio.", "Check microphone/PipeWire and try again.")
 

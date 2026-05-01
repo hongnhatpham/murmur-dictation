@@ -70,6 +70,20 @@ class InsertionConfig:
     fallback_paste_simulator: str = "ydotool"
     paste_tool: str = "wtype"
     press_enter_phrase: bool = True
+    auto_leading_space: bool = True
+    terminal_app_ids: tuple[str, ...] = (
+        "Alacritty",
+        "alacritty",
+        "kitty",
+        "foot",
+        "footclient",
+        "org.wezfurlong.wezterm",
+        "WezTerm",
+        "com.mitchellh.ghostty",
+        "ghostty",
+        "org.gnome.Terminal",
+        "konsole",
+    )
 
 
 @dataclass(frozen=True)
@@ -125,12 +139,16 @@ def _merge_cleanup(data: dict[str, Any]) -> CleanupConfig:
 def _merge_insertion(data: dict[str, Any]) -> InsertionConfig:
     defaults = InsertionConfig()
     paste_tool = str(data.get("paste_tool", data.get("paste_simulator", defaults.paste_tool)))
+    terminal_app_ids_raw = data.get("terminal_app_ids", defaults.terminal_app_ids)
+    terminal_app_ids = tuple(str(item) for item in terminal_app_ids_raw) if isinstance(terminal_app_ids_raw, list | tuple) else defaults.terminal_app_ids
     return InsertionConfig(
         clipboard_tool=str(data.get("clipboard_tool", defaults.clipboard_tool)),
         paste_simulator=str(data.get("paste_simulator", paste_tool)),
         fallback_paste_simulator=str(data.get("fallback_paste_simulator", defaults.fallback_paste_simulator)),
         paste_tool=paste_tool,
         press_enter_phrase=bool(data.get("press_enter_phrase", defaults.press_enter_phrase)),
+        auto_leading_space=bool(data.get("auto_leading_space", defaults.auto_leading_space)),
+        terminal_app_ids=terminal_app_ids,
     )
 
 
@@ -196,6 +214,8 @@ paste_tool = "{defaults.insertion.paste_tool}"
 paste_simulator = "{defaults.insertion.paste_simulator}"
 fallback_paste_simulator = "{defaults.insertion.fallback_paste_simulator}"
 press_enter_phrase = true
+auto_leading_space = true
+terminal_app_ids = {list(defaults.insertion.terminal_app_ids)!r}
 
 [privacy]
 history = true

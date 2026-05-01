@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 
@@ -17,6 +18,8 @@ _STATUS_OPTIONS = {
 
 def notify(summary: str, body: str = "") -> None:
     """Send a terse focus-safe desktop notification when libnotify is available."""
+    if os.environ.get("MURMUR_NOTIFY", "1").lower() in {"0", "false", "no", "off"}:
+        return
     if shutil.which("notify-send") is None:
         return
 
