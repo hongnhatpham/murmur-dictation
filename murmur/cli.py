@@ -12,6 +12,7 @@ from .audio_cleanup import cleanup_successful_audio, prune_audio_dir
 from .command import route_command_transform
 from .config import ensure_local_dirs, load_config, sample_config
 from .context import current_app_context
+from .correction import correct_text
 from .doctor import format_checks, has_required_failures, run_checks
 from .errors import MurmurError
 from .history import HistoryStore, format_entries
@@ -276,7 +277,15 @@ def _process_audio(
             snippets=snippets,
         )
         app_context = current_app_context(cfg.context)
-        final_text = transformed.final_text
+        correction = correct_text(
+            raw_transcript=transcript_text,
+            deterministic_text=transformed.final_text,
+            mode=mode,
+            config=cfg.correction,
+            app_context=app_context,
+            dictionary_terms=terms,
+        )
+        final_text = correction.final_text
         result = insert_text(final_text, transformed.actions, cfg.insertion, paste=paste)
         latency_ms = int((time.perf_counter() - start) * 1000)
         if cfg.privacy.history:
@@ -286,8 +295,9 @@ def _process_audio(
                 transcript=transcript_text,
                 deterministic_text=transformed.final_text,
                 final_text=final_text,
-                correction_provider="deterministic",
-                correction_status="skipped",
+                correction_provider=correction.provider,
+                correction_status=correction.status,
+                correction_latency_ms=correction.latency_ms,
                 focused_app_id=app_context.focused_app_id,
                 app_category=app_context.category,
                 actions=transformed.actions,

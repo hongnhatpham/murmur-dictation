@@ -471,12 +471,12 @@ Add an optional local LLM correction pass after deterministic cleanup. Start wit
 
 #### Acceptance criteria
 
-- [ ] Config can enable/disable AI correction independently of STT.
-- [ ] Correction receives raw transcript, deterministic text, category/style, and dictionary terms.
-- [ ] Prompt instructs the model to preserve meaning, avoid adding facts, and return only insertion text plus metadata.
-- [ ] Correction has a timeout and falls back to deterministic text on failure.
-- [ ] Raw mode bypasses AI correction unless explicitly requested.
-- [ ] Unit tests cover timeout/fallback and response parsing.
+- [x] Config can enable/disable AI correction independently of STT.
+- [x] Correction receives raw transcript, deterministic text, category/style, and dictionary terms.
+- [x] Prompt instructs the model to preserve meaning, avoid adding facts, and return only insertion text plus metadata.
+- [x] Correction has a timeout and falls back to deterministic text on failure.
+- [x] Raw mode bypasses AI correction unless explicitly requested.
+- [x] Unit tests cover timeout/fallback and response parsing.
 
 #### Implementation notes
 

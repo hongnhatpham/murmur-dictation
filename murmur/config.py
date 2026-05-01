@@ -87,6 +87,16 @@ class InsertionConfig:
 
 
 @dataclass(frozen=True)
+class CorrectionConfig:
+    enabled: bool = False
+    provider: str = "ollama"
+    model: str = "llama3.2:3b"
+    endpoint: str = "http://127.0.0.1:11434/api/generate"
+    timeout_seconds: float = 2.5
+    raw_mode: bool = False
+
+
+@dataclass(frozen=True)
 class CommandConfig:
     max_selection_chars: int = 12000
 
@@ -128,6 +138,7 @@ class MurmurConfig:
     paths: PathsConfig = field(default_factory=PathsConfig)
     stt: SttConfig = field(default_factory=SttConfig)
     cleanup: CleanupConfig = field(default_factory=CleanupConfig)
+    correction: CorrectionConfig = field(default_factory=CorrectionConfig)
     command: CommandConfig = field(default_factory=CommandConfig)
     insertion: InsertionConfig = field(default_factory=InsertionConfig)
     context: ContextConfig = field(default_factory=ContextConfig)
@@ -165,6 +176,18 @@ def _merge_stt(data: dict[str, Any]) -> SttConfig:
 def _merge_cleanup(data: dict[str, Any]) -> CleanupConfig:
     defaults = CleanupConfig()
     return CleanupConfig(default_mode=str(data.get("default_mode", defaults.default_mode)))
+
+
+def _merge_correction(data: dict[str, Any]) -> CorrectionConfig:
+    defaults = CorrectionConfig()
+    return CorrectionConfig(
+        enabled=bool(data.get("enabled", defaults.enabled)),
+        provider=str(data.get("provider", defaults.provider)),
+        model=str(data.get("model", defaults.model)),
+        endpoint=str(data.get("endpoint", defaults.endpoint)),
+        timeout_seconds=float(data.get("timeout_seconds", defaults.timeout_seconds)),
+        raw_mode=bool(data.get("raw_mode", defaults.raw_mode)),
+    )
 
 
 def _merge_command(data: dict[str, Any]) -> CommandConfig:
@@ -216,6 +239,7 @@ def load_config(path: str | Path | None = None) -> MurmurConfig:
         paths=_merge_paths(raw.get("paths", {})),
         stt=_merge_stt(raw.get("stt", {})),
         cleanup=_merge_cleanup(raw.get("cleanup", {})),
+        correction=_merge_correction(raw.get("correction", {})),
         command=_merge_command(raw.get("command", {})),
         insertion=_merge_insertion(raw.get("insertion", {})),
         context=_merge_context(raw.get("context", {})),
@@ -253,6 +277,15 @@ language = "{defaults.stt.language}"
 
 [cleanup]
 default_mode = "{defaults.cleanup.default_mode}" # "clean" or "raw"
+
+[correction]
+# Optional local LLM cleanup. Disabled by default until latency/quality is proven.
+enabled = false
+provider = "{defaults.correction.provider}"
+model = "{defaults.correction.model}"
+endpoint = "{defaults.correction.endpoint}"
+timeout_seconds = {defaults.correction.timeout_seconds}
+raw_mode = false
 
 [command]
 max_selection_chars = {defaults.command.max_selection_chars}

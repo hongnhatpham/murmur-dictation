@@ -47,6 +47,7 @@ Default behavior:
 - STT model: `base.en`
 - language: `auto`
 - cleanup mode: `clean`
+- AI correction: disabled by default; optional local Ollama-compatible correction can be enabled under `[correction]`
 - clipboard tool: `wl-copy`
 - paste simulator preference: `wtype`, then `ydotool`
 - history: enabled
@@ -98,6 +99,21 @@ whisper_cpp_model = "~/.cache/murmur/models/ggml-base.en.bin"
 ```
 
 Download model files manually into the local model cache. Model binaries are ignored by git and should not be committed.
+
+## Optional local AI correction
+
+Murmur's deterministic cleanup remains the default. To try a local Ollama-compatible polish pass after STT cleanup:
+
+```toml
+[correction]
+enabled = true
+provider = "ollama"
+model = "llama3.2:3b"
+endpoint = "http://127.0.0.1:11434/api/generate"
+timeout_seconds = 2.5
+```
+
+If correction times out or fails, Murmur falls back to the deterministic cleaned text instead of losing the dictation. Raw mode bypasses AI correction unless `[correction].raw_mode = true`.
 
 ## Personal dictionary and snippets
 
