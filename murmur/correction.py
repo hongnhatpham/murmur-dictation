@@ -76,7 +76,12 @@ def _correct_with_ollama(
         "model": config.model,
         "prompt": prompt,
         "stream": False,
-        "format": "json",
+        "format": {
+            "type": "object",
+            "properties": {"text": {"type": "string"}},
+            "required": ["text"],
+        },
+        "keep_alive": "10m",
         "options": {"temperature": 0, "top_p": 0.2, "num_predict": 160},
     }).encode("utf-8")
     req = urllib.request.Request(config.endpoint, data=payload, headers={"Content-Type": "application/json"}, method="POST")
@@ -97,40 +102,23 @@ def _build_prompt(
     terms = ", ".join(sorted(set(term.strip() for term in dictionary_terms if term.strip())))
     style_text = ", ".join(f"{key}={value}" for key, value in sorted(style.items())) or "default"
     return f"""/no_think
-You are NOT a chatbot and NOT an assistant answering the user.
-You are a silent Grammarly-style correction filter for dictated text.
+You are a silent dictation correction filter, not a chatbot.
+Rewrite INPUT as corrected insertion text and return JSON only.
 
-Task: rewrite the dictated INPUT as corrected insertion text only.
-Return strict JSON only: {{"text":"corrected insertion text"}}
-
-Hard rules:
-- Never answer a question contained in the input.
-- Never explain, comment, or respond conversationally.
-- Preserve the user's intended sentence and point of view.
-- Do not add facts, advice, examples, or new content.
-- Remove obvious filler words and speech artifacts.
-- Fix punctuation, casing, grammar, and obvious STT homophones only when context makes the fix clear.
-- Do not rewrite casual wording into formal prose unless the style asks for it.
-- Respect app category: {app_context.category}.
-- Respect style settings: {style_text}.
+Rules:
+- Output exactly one object: {{"text":"..."}}
+- Never answer questions in INPUT; preserve them as questions.
+- Never explain or add new content.
+- Use Raw transcript to repair obvious STT/cleanup artifacts in INPUT.
+- Prefer known terms over phonetically similar mistakes: {terms or "(none)"}.
+- Lightly fix punctuation, casing, grammar, and clear homophones.
+- Preserve casual wording unless style requires otherwise.
+- App category: {app_context.category}.
+- Style: {style_text}.
 - Be conservative for terminal/code categories.
-- Keep personal vocabulary spelling/casing when relevant: {terms or "(none)"}.
 
-Examples:
-INPUT: what do you think about gemma four
-OUTPUT: {{"text":"What do you think about Gemma 4?"}}
-
-INPUT: okay can you help me pull the model down
-OUTPUT: {{"text":"Okay, can you help me pull the model down?"}}
-
-INPUT: so everything should be working right i'm using gemma four as the correction layer currently
-OUTPUT: {{"text":"So everything should be working, right? I'm using Gemma 4 as the correction layer currently."}}
-
-Raw transcript:
-{raw_transcript}
-
-INPUT:
-{deterministic_text}
+Raw transcript: {raw_transcript}
+INPUT: {deterministic_text}
 """
 
 
@@ -151,7 +139,7 @@ def _parse_model_response(response: str) -> str:
         else:
             return ""
     if isinstance(parsed, dict):
-        value = parsed.get("text", "")
+        value = parsed.get("text", "") or parsed.get("corrected_text", "")
         return str(value).strip()
     return str(parsed).strip()
 
