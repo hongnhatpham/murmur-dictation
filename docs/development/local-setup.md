@@ -141,6 +141,7 @@ Examples:
 python -m murmur dictionary add "Niri"
 python -m murmur dictionary add "a r e a three" --replacement "ARIA-03" --category docs --note "assistant profile name"
 python -m murmur dictionary list
+python -m murmur dictionary misses --limit 50
 python -m murmur dictionary remove "Niri"
 
 python -m murmur snippets add ";sig" "Regards, Murmur"

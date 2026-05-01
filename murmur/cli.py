@@ -18,7 +18,7 @@ from .errors import MurmurError
 from .history import HistoryStore, format_entries
 from .insertion import InsertionError, copy_selection_to_clipboard, copy_to_clipboard, insert_text, read_clipboard
 from .notify import notify
-from .personal import PersonalStore, format_snippets, format_terms
+from .personal import PersonalStore, format_snippets, format_terms, format_vocabulary_misses, likely_vocabulary_misses
 from .styles import apply_style, style_for_category
 from .session import (
     acquire_lock,
@@ -162,6 +162,9 @@ def build_parser() -> argparse.ArgumentParser:
     dp = dict_sub.add_parser("remove", aliases=["rm"], help="remove a dictionary term by id or exact term")
     dp.add_argument("key")
     dp.set_defaults(func=cmd_dictionary_remove)
+    dp = dict_sub.add_parser("misses", help="show likely dictionary misses from recent history")
+    dp.add_argument("--limit", type=int, default=50)
+    dp.set_defaults(func=cmd_dictionary_misses)
 
     p = sub.add_parser("snippets", aliases=["snippet"], help="manage local text snippets")
     snip_sub = p.add_subparsers(required=True)
@@ -681,6 +684,15 @@ def cmd_dictionary_remove(args: argparse.Namespace) -> int:
         print(f"No dictionary term found: {args.key}", file=sys.stderr)
         return 1
     print(f"Removed dictionary term: {args.key}")
+    return 0
+
+
+def cmd_dictionary_misses(args: argparse.Namespace) -> int:
+    cfg = load_config()
+    ensure_local_dirs(cfg)
+    personal = PersonalStore(cfg.paths.personal_path)
+    entries = HistoryStore(cfg.paths.history_path).recent(args.limit)
+    print(format_vocabulary_misses(likely_vocabulary_misses(entries, personal.list_terms())))
     return 0
 
 

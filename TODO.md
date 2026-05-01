@@ -202,7 +202,7 @@ Add a local dictionary for names, project terms, acronyms, tools, and slang. Fee
 - [x] CLI can add, list, and remove dictionary terms.
 - [x] Dictionary terms are included in transform context.
 - [x] STT hints are used when the selected provider supports them.
-- [ ] History can mark likely vocabulary misses for later review. Deferred: needs real dictation corpus/HITL review.
+- [x] History can mark likely vocabulary misses for later review.
 - [x] Documentation includes examples like project names and technical terms.
 
 #### Implementation notes
@@ -450,7 +450,7 @@ Upgrade the dictionary from simple term storage to correction-aware vocabulary: 
 
 - [x] Dictionary entries can include preferred casing and optional replacement text.
 - [x] Correction prompts and deterministic cleanup receive relevant dictionary entries.
-- [ ] History can surface likely misses for review.
+- [x] History can surface likely misses for review.
 - [x] CLI supports add/list/remove for the expanded fields.
 - [x] Existing dictionary data migrates or remains compatible.
 

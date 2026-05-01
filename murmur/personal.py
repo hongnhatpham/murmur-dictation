@@ -44,6 +44,14 @@ class Snippet:
     expansion: str
 
 
+@dataclass(frozen=True)
+class VocabularyMiss:
+    term: str
+    expected: str
+    history_id: int
+    transcript: str
+
+
 class PersonalStore:
     """Local SQLite storage for personal vocabulary and text snippets."""
 
@@ -176,6 +184,34 @@ def format_terms(terms: Iterable[DictionaryTerm]) -> str:
         category = f" [{term.category}]" if term.category else ""
         note = f"  # {term.note}" if term.note else ""
         lines.append(f"{term.id:>4}  {term.term}{replacement}{category}{note}")
+    return "\n".join(lines)
+
+
+def likely_vocabulary_misses(entries: Iterable[object], terms: Iterable[DictionaryTerm]) -> list[VocabularyMiss]:
+    misses: list[VocabularyMiss] = []
+    for entry in entries:
+        transcript = (getattr(entry, "transcript", None) or "").lower()
+        final_text = (getattr(entry, "final_text", None) or "").lower()
+        history_id = int(getattr(entry, "id", 0) or 0)
+        if not transcript:
+            continue
+        for term in terms:
+            source = term.term.strip()
+            expected = (term.replacement or term.term).strip()
+            if not source or not expected:
+                continue
+            if source.lower() in transcript and expected.lower() not in final_text:
+                misses.append(VocabularyMiss(term=source, expected=expected, history_id=history_id, transcript=getattr(entry, "transcript", "") or ""))
+    return misses
+
+
+def format_vocabulary_misses(misses: Iterable[VocabularyMiss]) -> str:
+    lines = []
+    for miss in misses:
+        transcript = miss.transcript.replace("\n", " ").strip()
+        if len(transcript) > 80:
+            transcript = transcript[:77] + "..."
+        lines.append(f"history={miss.history_id}  {miss.term} -> {miss.expected}  transcript={transcript}")
     return "\n".join(lines)
 
 
