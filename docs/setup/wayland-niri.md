@@ -53,6 +53,26 @@ murmur cancel-recording
 
 niri's basic `binds` are press-triggered rather than release-triggered, so the one-shot `murmur dictate --paste` binding remains the recommended niri-only MVP path unless you add a release-aware binding helper.
 
+## Start hold-to-talk on boot
+
+Install and enable the root-level evdev hotkey service so `Super+M` works immediately after login:
+
+```sh
+sudo cp "/mnt/storage/01 Projects/murmur-dictation/packaging/systemd/murmur-hotkey-evdev.service" /etc/systemd/system/murmur-hotkey-evdev.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now murmur-hotkey-evdev.service
+systemctl status murmur-hotkey-evdev.service
+```
+
+The service runs only the hotkey listener as root for keyboard-device access. Dictation commands are executed back as `hongnhatpham` with the Wayland/session environment from the service file.
+
+Logs:
+
+```sh
+murmur logs --lines 80
+journalctl -u murmur-hotkey-evdev.service -n 80 --no-pager
+```
+
 ## Minimal notifications
 
 Until the overlay exists, use short focus-safe notifications:

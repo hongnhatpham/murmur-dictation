@@ -23,7 +23,9 @@ KEY_TRIGGER = ecodes.KEY_M
 
 
 def desktop_user() -> tuple[str, int]:
-    user = os.environ.get("SUDO_USER") or os.environ.get("PKEXEC_UID") or os.environ.get("USER") or "hongnhatpham"
+    user = os.environ.get("MURMUR_DESKTOP_USER") or os.environ.get("SUDO_USER") or os.environ.get("PKEXEC_UID") or os.environ.get("USER") or "hongnhatpham"
+    if user == "root":
+        user = "hongnhatpham"
     if user.isdigit():
         import pwd
         pw = pwd.getpwuid(int(user))

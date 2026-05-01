@@ -1,0 +1,20 @@
+[Unit]
+Description=Murmur hold-to-record evdev hotkey daemon
+Documentation=https://github.com/hongnhatpham/murmur-dictation
+After=graphical.target
+
+[Service]
+Type=simple
+Environment=MURMUR_DESKTOP_USER=hongnhatpham
+Environment=WAYLAND_DISPLAY=wayland-1
+Environment=DISPLAY=:0
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
+Environment=MURMUR_NOTIFY=0
+ExecStart=/usr/bin/python3 "/mnt/storage/01 Projects/murmur-dictation/scripts/murmur-hotkey-evdev"
+Restart=on-failure
+RestartSec=2
+Nice=-5
+
+[Install]
+WantedBy=graphical.target
