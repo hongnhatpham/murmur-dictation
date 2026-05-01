@@ -17,7 +17,13 @@ CREATE TABLE IF NOT EXISTS dictations (
     mode TEXT NOT NULL,
     provider TEXT NOT NULL,
     transcript TEXT,
+    deterministic_text TEXT,
     final_text TEXT,
+    correction_provider TEXT,
+    correction_status TEXT NOT NULL DEFAULT 'skipped',
+    correction_latency_ms INTEGER,
+    focused_app_id TEXT,
+    app_category TEXT,
     actions TEXT NOT NULL DEFAULT '',
     insertion_status TEXT NOT NULL DEFAULT 'unknown',
     audio_duration_ms INTEGER,
@@ -38,6 +44,12 @@ class HistoryEntry:
     final_text: str | None
     insertion_status: str
     error_message: str | None
+    deterministic_text: str | None = None
+    correction_provider: str | None = None
+    correction_status: str = "skipped"
+    correction_latency_ms: int | None = None
+    focused_app_id: str | None = None
+    app_category: str | None = None
 
 
 @dataclass(frozen=True)
@@ -101,6 +113,12 @@ class HistoryStore:
         audio_duration_ms: int | None = None,
         latency_ms: int | None = None,
         created_at: str | None = None,
+        deterministic_text: str | None = None,
+        correction_provider: str | None = None,
+        correction_status: str = "skipped",
+        correction_latency_ms: int | None = None,
+        focused_app_id: str | None = None,
+        app_category: str | None = None,
     ) -> int:
         timestamp = created_at or datetime.now(timezone.utc).isoformat(timespec="seconds")
         action_text = ",".join(getattr(a, "name", str(a)) for a in (actions or []))
@@ -109,10 +127,27 @@ class HistoryStore:
             cur = conn.execute(
                 """
                 INSERT INTO dictations
-                (created_at, mode, provider, transcript, final_text, actions, insertion_status, audio_duration_ms, latency_ms, error_message)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (created_at, mode, provider, transcript, deterministic_text, final_text, correction_provider, correction_status, correction_latency_ms, focused_app_id, app_category, actions, insertion_status, audio_duration_ms, latency_ms, error_message)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (timestamp, mode, provider, transcript, final_text, action_text, insertion_status, audio_duration_ms, latency_ms, error_message or error),
+                (
+                    timestamp,
+                    mode,
+                    provider,
+                    transcript,
+                    deterministic_text if deterministic_text is not None else final_text,
+                    final_text,
+                    correction_provider,
+                    correction_status,
+                    correction_latency_ms,
+                    focused_app_id,
+                    app_category,
+                    action_text,
+                    insertion_status,
+                    audio_duration_ms,
+                    latency_ms,
+                    error_message or error,
+                ),
             )
             conn.commit()
             return int(cur.lastrowid)
@@ -124,7 +159,7 @@ class HistoryStore:
         try:
             rows = conn.execute(
                 """
-                SELECT id, created_at, mode, provider, transcript, final_text, insertion_status, error_message
+                SELECT id, created_at, mode, provider, transcript, deterministic_text, final_text, correction_provider, correction_status, correction_latency_ms, focused_app_id, app_category, insertion_status, error_message
                 FROM dictations
                 ORDER BY id DESC
                 LIMIT ?
@@ -146,6 +181,12 @@ def _ensure_columns(conn: sqlite3.Connection) -> None:
         "actions": "ALTER TABLE dictations ADD COLUMN actions TEXT NOT NULL DEFAULT ''",
         "audio_duration_ms": "ALTER TABLE dictations ADD COLUMN audio_duration_ms INTEGER",
         "latency_ms": "ALTER TABLE dictations ADD COLUMN latency_ms INTEGER",
+        "deterministic_text": "ALTER TABLE dictations ADD COLUMN deterministic_text TEXT",
+        "correction_provider": "ALTER TABLE dictations ADD COLUMN correction_provider TEXT",
+        "correction_status": "ALTER TABLE dictations ADD COLUMN correction_status TEXT NOT NULL DEFAULT 'skipped'",
+        "correction_latency_ms": "ALTER TABLE dictations ADD COLUMN correction_latency_ms INTEGER",
+        "focused_app_id": "ALTER TABLE dictations ADD COLUMN focused_app_id TEXT",
+        "app_category": "ALTER TABLE dictations ADD COLUMN app_category TEXT",
     }.items():
         if name not in existing:
             conn.execute(ddl)
@@ -161,6 +202,12 @@ def _entry(row: sqlite3.Row) -> HistoryEntry:
         final_text=row["final_text"],
         insertion_status=str(row["insertion_status"]),
         error_message=row["error_message"],
+        deterministic_text=row["deterministic_text"],
+        correction_provider=row["correction_provider"],
+        correction_status=str(row["correction_status"]),
+        correction_latency_ms=row["correction_latency_ms"],
+        focused_app_id=row["focused_app_id"],
+        app_category=row["app_category"],
     )
 
 
@@ -206,8 +253,10 @@ def format_entries(entries: Iterable[HistoryEntry]) -> str:
         if len(text) > 80:
             text = text[:77] + "..."
         error = f" error={e.error_message}" if e.error_message else ""
+        correction = f" correction={e.correction_status}"
+        category = f" app={e.app_category}" if e.app_category else ""
         lines.append(
             f"{e.id:>4}  {e.created_at}  mode={e.mode} provider={e.provider} "
-            f"status={e.insertion_status}{error}  {text}"
+            f"status={e.insertion_status}{correction}{category}{error}  {text}"
         )
     return "\n".join(lines)

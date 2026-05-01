@@ -381,10 +381,10 @@ Extend the dictation pipeline and history records so every insertion can show th
 
 #### Acceptance criteria
 
-- [ ] History distinguishes raw transcript, deterministic cleaned text, and final insertion text.
-- [ ] History records `correction_provider`, `correction_latency_ms`, and `correction_status`.
-- [ ] `murmur history` and recovery commands remain useful and concise.
-- [ ] Failed correction never loses raw transcript or deterministic text.
+- [x] History distinguishes raw transcript, deterministic cleaned text, and final insertion text.
+- [x] History records `correction_provider`, `correction_latency_ms`, and `correction_status`.
+- [x] `murmur history` and recovery commands remain useful and concise.
+- [x] Failed correction never loses raw transcript or deterministic text.
 
 #### Implementation notes
 
@@ -403,11 +403,11 @@ Map the focused app/window to a Murmur category such as terminal/code, AI chat/d
 
 #### Acceptance criteria
 
-- [ ] Murmur detects focused niri app ID where available.
-- [ ] Config maps app IDs or URL/app hints to categories.
-- [ ] Terminal/code contexts are classified conservatively.
-- [ ] History records the detected app ID and category.
-- [ ] Missing app data falls back to `other` without failing dictation.
+- [x] Murmur detects focused niri app ID where available.
+- [x] Config maps app IDs or URL/app hints to categories.
+- [x] Terminal/code contexts are classified conservatively.
+- [x] History records the detected app ID and category.
+- [x] Missing app data falls back to `other` without failing dictation.
 
 #### Implementation notes
 
@@ -426,7 +426,7 @@ Improve cursor-adjacent formatting: leading spaces, lowercase continuation, punc
 
 #### Acceptance criteria
 
-- [ ] Subsequent dictations insert a leading space when continuing prose.
+- [x] Subsequent dictations insert a leading space when continuing prose.
 - [ ] Mid-sentence continuation can lowercase the first word when appropriate.
 - [ ] Punctuation-leading text does not receive an extra leading space.
 - [ ] Messaging categories can omit trailing periods when configured.

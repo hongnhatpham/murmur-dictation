@@ -50,7 +50,7 @@ Default behavior:
 - clipboard tool: `wl-copy`
 - paste simulator preference: `wtype`, then `ydotool`
 - history: enabled
-- debug audio retention: disabled; successfully transcribed temporary audio is removed automatically
+- debug audio retention: disabled; successfully transcribed temporary audio is removed automatically, and retained debug audio is pruned after 1 day by default
 
 Generate a documented config with:
 

@@ -87,10 +87,34 @@ class InsertionConfig:
 
 
 @dataclass(frozen=True)
+class ContextConfig:
+    app_categories: dict[str, str] = field(default_factory=lambda: {
+        "Alacritty": "terminal",
+        "alacritty": "terminal",
+        "kitty": "terminal",
+        "foot": "terminal",
+        "footclient": "terminal",
+        "org.wezfurlong.wezterm": "terminal",
+        "WezTerm": "terminal",
+        "com.mitchellh.ghostty": "terminal",
+        "ghostty": "terminal",
+        "org.gnome.Terminal": "terminal",
+        "konsole": "terminal",
+        "Code": "code",
+        "code": "code",
+        "codium": "code",
+        "discord": "personal_message",
+        "Slack": "work_message",
+        "signal": "personal_message",
+        "thunderbird": "email",
+    })
+
+
+@dataclass(frozen=True)
 class PrivacyConfig:
     history: bool = True
     keep_debug_audio: bool = False
-    keep_audio_days: int = 0
+    keep_audio_days: int = 1
 
 
 @dataclass(frozen=True)
@@ -100,6 +124,7 @@ class MurmurConfig:
     stt: SttConfig = field(default_factory=SttConfig)
     cleanup: CleanupConfig = field(default_factory=CleanupConfig)
     insertion: InsertionConfig = field(default_factory=InsertionConfig)
+    context: ContextConfig = field(default_factory=ContextConfig)
     privacy: PrivacyConfig = field(default_factory=PrivacyConfig)
 
 
@@ -152,6 +177,14 @@ def _merge_insertion(data: dict[str, Any]) -> InsertionConfig:
     )
 
 
+def _merge_context(data: dict[str, Any]) -> ContextConfig:
+    defaults = ContextConfig()
+    raw = data.get("app_categories", defaults.app_categories)
+    if not isinstance(raw, dict):
+        raw = defaults.app_categories
+    return ContextConfig(app_categories={str(key): str(value) for key, value in raw.items()})
+
+
 def _merge_privacy(data: dict[str, Any]) -> PrivacyConfig:
     defaults = PrivacyConfig()
     return PrivacyConfig(
@@ -173,6 +206,7 @@ def load_config(path: str | Path | None = None) -> MurmurConfig:
         stt=_merge_stt(raw.get("stt", {})),
         cleanup=_merge_cleanup(raw.get("cleanup", {})),
         insertion=_merge_insertion(raw.get("insertion", {})),
+        context=_merge_context(raw.get("context", {})),
         privacy=_merge_privacy(raw.get("privacy", {})),
     )
 
@@ -217,10 +251,14 @@ press_enter_phrase = true
 auto_leading_space = true
 terminal_app_ids = {list(defaults.insertion.terminal_app_ids)!r}
 
+[context]
+# Maps focused app IDs to correction/style categories.
+# app_categories = {{"Alacritty" = "terminal", "Code" = "code", "Slack" = "work_message"}}
+
 [privacy]
 history = true
 keep_debug_audio = false
-keep_audio_days = 0
+keep_audio_days = 1
 '''
 
 

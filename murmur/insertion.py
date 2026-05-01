@@ -269,10 +269,11 @@ def insert_text(
 ) -> InsertionResult:
     """Copy text and optionally paste it, with injectable test doubles."""
     config = config or InsertionConfig()
+    injected_clipboard = clipboard is not None
     clipboard = clipboard or WlClipboard(config.clipboard_tool)
     simulator = simulator or _first_available_simulator(config)
 
-    if clipboard is None and should_prepend_space(text, config):
+    if not injected_clipboard and should_prepend_space(text, config):
         text = " " + text
 
     if text:

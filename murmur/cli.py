@@ -11,6 +11,7 @@ from .audio import record_audio
 from .audio_cleanup import cleanup_successful_audio, prune_audio_dir
 from .command import route_command_transform
 from .config import ensure_local_dirs, load_config, sample_config
+from .context import current_app_context
 from .doctor import format_checks, has_required_failures, run_checks
 from .errors import MurmurError
 from .history import HistoryStore, format_entries
@@ -274,6 +275,7 @@ def _process_audio(
             dictionary_terms=terms,
             snippets=snippets,
         )
+        app_context = current_app_context(cfg.context)
         final_text = transformed.final_text
         result = insert_text(final_text, transformed.actions, cfg.insertion, paste=paste)
         latency_ms = int((time.perf_counter() - start) * 1000)
@@ -282,7 +284,12 @@ def _process_audio(
                 mode=mode,
                 provider=provider,
                 transcript=transcript_text,
+                deterministic_text=transformed.final_text,
                 final_text=final_text,
+                correction_provider="deterministic",
+                correction_status="skipped",
+                focused_app_id=app_context.focused_app_id,
+                app_category=app_context.category,
                 actions=transformed.actions,
                 insertion_status=result.status,
                 audio_duration_ms=duration_ms,
@@ -299,7 +306,10 @@ def _process_audio(
                 mode=mode,
                 provider=provider,
                 transcript=transcript_text or None,
+                deterministic_text=final_text or None,
                 final_text=final_text or None,
+                correction_provider="deterministic",
+                correction_status="failed" if final_text else "skipped",
                 insertion_status="failed",
                 error_message=str(exc),
             )
@@ -469,13 +479,19 @@ def _cmd_insert_text(args: argparse.Namespace, *, paste: bool) -> int:
         dictionary_terms=[term.term for term in personal.list_terms()],
         snippets=personal.snippet_map(),
     )
+    app_context = current_app_context(cfg.context)
     result = insert_text(transformed.final_text, transformed.actions, cfg.insertion, paste=paste)
     if cfg.privacy.history and not args.private:
         HistoryStore(cfg.paths.history_path).add(
             mode=mode,
             provider="manual",
             transcript=transcript_text,
+            deterministic_text=transformed.final_text,
             final_text=transformed.final_text,
+            correction_provider="deterministic",
+            correction_status="skipped",
+            focused_app_id=app_context.focused_app_id,
+            app_category=app_context.category,
             actions=transformed.actions,
             insertion_status=result.status,
         )
@@ -525,13 +541,19 @@ def cmd_command(args: argparse.Namespace) -> int:
             print(selected_text)
             return 2
 
+        app_context = current_app_context(cfg.context)
         result = insert_text(routed.final_text, [], cfg.insertion, paste=(args.paste or args.selection))
         if cfg.privacy.history:
             HistoryStore(cfg.paths.history_path).add(
                 mode=f"command:{routed.command}",
                 provider=provider,
                 transcript=transcript_text,
+                deterministic_text=routed.final_text,
                 final_text=routed.final_text,
+                correction_provider="deterministic",
+                correction_status="skipped",
+                focused_app_id=app_context.focused_app_id,
+                app_category=app_context.category,
                 actions=[],
                 insertion_status=result.status,
             )

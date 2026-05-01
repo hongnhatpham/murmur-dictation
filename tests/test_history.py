@@ -10,7 +10,18 @@ class HistoryTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmpdir:
             store = HistoryStore(Path(tmpdir) / "history.sqlite3")
-            store.add(mode="clean", provider="test", transcript="hi", final_text="Hi.", insertion_status="copied-only")
+            store.add(
+                mode="clean",
+                provider="test",
+                transcript="hi",
+                deterministic_text="Hi.",
+                final_text="Hi.",
+                correction_provider="deterministic",
+                correction_status="skipped",
+                focused_app_id="Alacritty",
+                app_category="terminal",
+                insertion_status="copied-only",
+            )
             rows = store.recent()
 
         self.assertEqual(len(rows), 1)
@@ -19,6 +30,11 @@ class HistoryTests(unittest.TestCase):
         self.assertEqual(rows[0].transcript, "hi")
         self.assertEqual(rows[0].final_text, "Hi.")
         self.assertEqual(rows[0].insertion_status, "copied-only")
+        self.assertEqual(rows[0].deterministic_text, "Hi.")
+        self.assertEqual(rows[0].correction_provider, "deterministic")
+        self.assertEqual(rows[0].correction_status, "skipped")
+        self.assertEqual(rows[0].focused_app_id, "Alacritty")
+        self.assertEqual(rows[0].app_category, "terminal")
 
     def test_format_entries(self):
         import tempfile
@@ -29,6 +45,7 @@ class HistoryTests(unittest.TestCase):
             store.add(mode="raw", provider="test", transcript="x", final_text="x", insertion_status="failed", error="boom")
             formatted = format_entries(store.recent())
         self.assertIn("failed", formatted)
+        self.assertIn("correction=skipped", formatted)
         self.assertIn("boom", formatted)
 
 

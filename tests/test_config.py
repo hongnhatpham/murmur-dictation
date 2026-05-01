@@ -15,6 +15,7 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(cfg.stt.model, "base.en")
         self.assertEqual(cfg.insertion.paste_tool, "wtype")
         self.assertTrue(cfg.privacy.history)
+        self.assertEqual(cfg.privacy.keep_audio_days, 1)
 
 
 if __name__ == "__main__":
