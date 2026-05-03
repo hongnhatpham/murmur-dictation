@@ -9,6 +9,7 @@ def test_dictionary_cli_add_list_remove(tmp_path, monkeypatch, capsys):
     assert main(["dictionary", "list"]) == 0
     assert "Niri" in capsys.readouterr().out
     assert main(["dictionary", "remove", "Niri"]) == 0
+    capsys.readouterr()
     assert main(["dictionary", "list"]) == 0
     assert "Niri" not in capsys.readouterr().out
 
