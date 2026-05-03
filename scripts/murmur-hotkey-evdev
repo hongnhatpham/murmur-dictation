@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Tiny evdev hold-to-record hotkey daemon for Murmur.
 
-Listens for Super+M on real keyboard devices. Press starts recording;
+Listens for Super+M across real keyboard devices. Press starts recording;
 releasing either M or Super stops and processes. Intended to be run with
 root input access while commands execute as the original desktop user.
 """
@@ -11,7 +11,6 @@ import os
 import selectors
 import shutil
 import subprocess
-import sys
 import time
 from pathlib import Path
 
@@ -20,6 +19,7 @@ from evdev import InputDevice, ecodes, list_devices
 MURMUR = "/mnt/storage/01 Projects/murmur-dictation/.venv/bin/murmur"
 KEY_SUPERS = {ecodes.KEY_LEFTMETA, ecodes.KEY_RIGHTMETA}
 KEY_TRIGGER = ecodes.KEY_M
+RESCAN_INTERVAL_SECONDS = 2.0
 
 
 def desktop_user() -> tuple[str, int]:
@@ -109,15 +109,24 @@ def erase_trigger_leak() -> None:
     run_logged(as_user_command(["wtype", "-k", "BackSpace"]), wait=True, timeout=2)
 
 
-def keyboard_devices() -> list[InputDevice]:
+def keyboard_devices(*, log_devices: bool = True) -> list[InputDevice]:
     devices: list[InputDevice] = []
     for path in list_devices():
         try:
             dev = InputDevice(path)
             keys = set(dev.capabilities().get(ecodes.EV_KEY, []))
-            if KEY_TRIGGER in keys and keys.intersection(KEY_SUPERS):
+            roles = []
+            if KEY_TRIGGER in keys:
+                roles.append("trigger")
+            if keys.intersection(KEY_SUPERS):
+                roles.append("modifier")
+            # Composite keyboards often split regular keys and modifiers across
+            # multiple evdev nodes. Watch every node that contributes any part
+            # of the hotkey, then track pressed state globally across devices.
+            if roles:
                 devices.append(dev)
-                log(f"device {dev.path} {dev.name}")
+                if log_devices:
+                    log(f"device {dev.path} {dev.name} roles={','.join(roles)}")
             else:
                 dev.close()
         except PermissionError as exc:
@@ -130,18 +139,45 @@ def keyboard_devices() -> list[InputDevice]:
 def main() -> int:
     log_path().parent.mkdir(parents=True, exist_ok=True)
     log("starting")
-    devices = keyboard_devices()
-    if not devices:
-        log("no keyboard devices found; run with sudo/root or add user to input group")
-        print("murmur-hotkey-evdev: no readable keyboard devices", file=sys.stderr)
-        return 1
-
     sel = selectors.DefaultSelector()
-    for dev in devices:
-        sel.register(dev.fd, selectors.EVENT_READ, dev)
+    devices: list[InputDevice] = []
 
-    super_down = False
-    trigger_down = False
+    def close_devices() -> None:
+        for dev in devices:
+            try:
+                sel.unregister(dev.fd)
+            except Exception:
+                pass
+            try:
+                dev.close()
+            except Exception:
+                pass
+        devices.clear()
+
+    def rescan_devices() -> bool:
+        previous_paths = {dev.path for dev in devices}
+        close_devices()
+        devices.extend(keyboard_devices(log_devices=not previous_paths))
+        current_paths = {dev.path for dev in devices}
+        for dev in devices:
+            sel.register(dev.fd, selectors.EVENT_READ, dev)
+        if devices:
+            if current_paths != previous_paths:
+                if previous_paths:
+                    log(
+                        "keyboard device set changed "
+                        f"old={','.join(sorted(previous_paths))} "
+                        f"new={','.join(sorted(current_paths))}"
+                    )
+                log(f"watching {len(devices)} keyboard device(s)")
+            return True
+        log("no keyboard devices found; waiting for input devices/root access")
+        return False
+
+    rescan_devices()
+
+    pressed_supers: set[tuple[str, int]] = set()
+    pressed_triggers: set[tuple[str, int]] = set()
     recording = False
 
     def start() -> None:
@@ -164,30 +200,69 @@ def main() -> int:
         time.sleep(0.05)
         run_murmur(["stop-recording"], wait=False)
 
+    def maybe_start() -> None:
+        if pressed_supers and pressed_triggers:
+            start()
+
     def maybe_stop(reason: str) -> None:
-        if recording and not super_down and not trigger_down:
+        if recording and not pressed_supers and not pressed_triggers:
             stop(reason)
 
     try:
         while True:
-            for key, _mask in sel.select():
+            if not devices:
+                rescan_devices()
+                if not devices:
+                    time.sleep(RESCAN_INTERVAL_SECONDS)
+                    continue
+
+            selected = sel.select(timeout=RESCAN_INTERVAL_SECONDS)
+            if not selected:
+                if not recording and not pressed_supers and not pressed_triggers:
+                    rescan_devices()
+                continue
+
+            for key, _mask in selected:
                 dev: InputDevice = key.data
-                for event in dev.read():
+                try:
+                    events = dev.read()
+                except OSError as exc:
+                    if getattr(exc, "errno", None) == 19:  # ENODEV: keyboard unplugged or re-enumerated.
+                        log(f"device disappeared {getattr(dev, 'path', '?')}; rescanning")
+                        try:
+                            sel.unregister(dev.fd)
+                        except Exception:
+                            pass
+                        try:
+                            dev.close()
+                        except Exception:
+                            pass
+                        devices = [candidate for candidate in devices if candidate is not dev]
+                        pressed_supers.difference_update({key for key in pressed_supers if key[0] == dev.path})
+                        pressed_triggers.difference_update({key for key in pressed_triggers if key[0] == dev.path})
+                        continue
+                    raise
+                for event in events:
                     if event.type != ecodes.EV_KEY:
                         continue
                     code = event.code
                     value = event.value  # 1 down, 0 up, 2 repeat
                     if value == 2:
                         continue
+                    key_id = (dev.path, code)
                     if code in KEY_SUPERS:
-                        super_down = value == 1
-                        if value == 0:
+                        if value == 1:
+                            pressed_supers.add(key_id)
+                            maybe_start()
+                        elif value == 0:
+                            pressed_supers.discard(key_id)
                             maybe_stop("all-keys-released")
                     elif code == KEY_TRIGGER:
-                        trigger_down = value == 1
-                        if value == 1 and super_down:
-                            start()
+                        if value == 1:
+                            pressed_triggers.add(key_id)
+                            maybe_start()
                         elif value == 0:
+                            pressed_triggers.discard(key_id)
                             maybe_stop("all-keys-released")
     except KeyboardInterrupt:
         log("keyboard interrupt")

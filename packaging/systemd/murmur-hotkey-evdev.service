@@ -1,7 +1,9 @@
 [Unit]
 Description=Murmur hold-to-record evdev hotkey daemon
 Documentation=https://github.com/hongnhatpham/murmur-dictation
-After=graphical.target
+After=systemd-udev-settle.service
+Wants=systemd-udev-settle.service
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
@@ -17,4 +19,4 @@ RestartSec=2
 Nice=-5
 
 [Install]
-WantedBy=graphical.target
+WantedBy=multi-user.target
