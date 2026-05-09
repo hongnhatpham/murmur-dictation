@@ -80,16 +80,6 @@ class ToolSimulator:
         if proc.returncode != 0:
             raise InsertionError(proc.stderr.strip() or f"{self.name} paste failed")
 
-    def type_text(self, text: str) -> None:
-        if self.name == "wtype":
-            proc = subprocess.run(["wtype", "-"], input=text, text=True, capture_output=True)
-        elif self.name == "ydotool":
-            raise InsertionError("ydotool direct text insertion is not supported")
-        else:
-            raise InsertionError(f"Unsupported text simulator: {self.name}")
-        if proc.returncode != 0:
-            raise InsertionError(proc.stderr.strip() or f"{self.name} text insertion failed")
-
     def release_modifiers(self) -> None:
         if self.name == "wtype":
             # Defensive cleanup for virtual-keyboard state. Some terminal/compositor
@@ -172,8 +162,16 @@ def _candidate_simulators(config: InsertionConfig) -> list[ToolSimulator]:
     return candidates
 
 
-def _first_available_simulator(config: InsertionConfig) -> ToolSimulator | None:
-    for simulator in _candidate_simulators(config):
+def _first_available_simulator(config: InsertionConfig, *, prefer_uinput: bool = False) -> ToolSimulator | None:
+    candidates = _candidate_simulators(config)
+    if prefer_uinput:
+        # Prefer a real uinput event source for terminal insertion. On niri,
+        # wtype's Wayland virtual-keyboard path can leave some terminal windows
+        # in an input-stalled state after synthetic text/paste. ydotool goes
+        # through the kernel input stack instead, so the focused app sees a
+        # normal key sequence and does not need a compositor focus nudge.
+        candidates = sorted(candidates, key=lambda simulator: simulator.name != "ydotool")
+    for simulator in candidates:
         if simulator.available():
             return simulator
     return None
@@ -240,28 +238,14 @@ def should_prepend_space(text: str, config: InsertionConfig) -> bool:
     return format_for_previous_text(text, existing, auto_leading_space=True) != text
 
 
-def refresh_niri_focus(window: dict | None) -> None:
-    """Work around occasional niri/terminal input stalls after virtual keyboard insertion."""
-    if shutil.which("niri") is None or not window or "id" not in window:
-        return
-    window_id = str(window["id"])
-    try:
-        subprocess.run(["niri", "msg", "action", "focus-window-previous"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.5)
-        time.sleep(0.03)
-        subprocess.run(["niri", "msg", "action", "focus-window", "--id", window_id], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.5)
-    except Exception:
-        return
-
-
 def paste_from_clipboard(config: InsertionConfig) -> bool:
-    simulator = _first_available_simulator(config)
+    window = focused_window()
+    terminal = is_terminal_focused(config, window)
+    simulator = _first_available_simulator(config, prefer_uinput=terminal)
     if simulator is None:
         return False
     try:
-        window = focused_window()
-        simulator.paste(terminal=is_terminal_focused(config, window))
-        if is_terminal_focused(config, window):
-            refresh_niri_focus(window)
+        simulator.paste(terminal=terminal)
         return True
     except InsertionError:
         return False
@@ -291,7 +275,9 @@ def insert_text(
     config = config or InsertionConfig()
     injected_clipboard = clipboard is not None
     clipboard = clipboard or WlClipboard(config.clipboard_tool)
-    simulator = simulator or _first_available_simulator(config)
+    window = focused_window()
+    terminal = is_terminal_focused(config, window)
+    simulator = simulator or _first_available_simulator(config, prefer_uinput=terminal)
 
     if not injected_clipboard:
         try:
@@ -315,18 +301,11 @@ def insert_text(
     paste_attempted = False
     enter_sent = False
     try:
-        window = focused_window()
-        terminal = is_terminal_focused(config, window)
         try:
             if text:
                 paste_attempted = True
                 if isinstance(simulator, ToolSimulator):
-                    if terminal and simulator.name == "wtype":
-                        # Terminals are sensitive to synthetic paste modifiers.
-                        # Type text directly, then nudge niri focus to restore input.
-                        simulator.type_text(text)
-                    else:
-                        simulator.paste(terminal=terminal)
+                    simulator.paste(terminal=terminal)
                 else:
                     simulator.paste()
                 time.sleep(0.08)
@@ -336,8 +315,6 @@ def insert_text(
         finally:
             if isinstance(simulator, ToolSimulator):
                 simulator.release_modifiers()
-            if terminal:
-                refresh_niri_focus(window)
     except InsertionError as exc:
         return InsertionResult(status="copied-only", message=f"Copied to clipboard; paste failed: {exc}", paste_attempted=paste_attempted)
 

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import patch
 
-from murmur.insertion import format_for_previous_text, insert_text
+from murmur.config import InsertionConfig
+from murmur.insertion import _first_available_simulator, format_for_previous_text, insert_text
 from murmur.transform import TransformAction, PRESS_ENTER_AFTER_INSERT
 
 
@@ -81,6 +83,20 @@ class InsertionTests(unittest.TestCase):
 
     def test_continuation_does_not_lowercase_terminal_code(self):
         self.assertEqual(format_for_previous_text("Next", "cmd", category="terminal"), " Next")
+
+    def test_terminal_prefer_uinput_picks_ydotool_over_wtype(self):
+        config = InsertionConfig(paste_simulator="wtype", fallback_paste_simulator="ydotool", paste_tool="wtype")
+        with patch("shutil.which", return_value="/usr/bin/tool"):
+            simulator = _first_available_simulator(config, prefer_uinput=True)
+        self.assertIsNotNone(simulator)
+        self.assertEqual(simulator.name, "ydotool")
+
+    def test_normal_insertion_keeps_configured_simulator_order(self):
+        config = InsertionConfig(paste_simulator="wtype", fallback_paste_simulator="ydotool", paste_tool="wtype")
+        with patch("shutil.which", return_value="/usr/bin/tool"):
+            simulator = _first_available_simulator(config)
+        self.assertIsNotNone(simulator)
+        self.assertEqual(simulator.name, "wtype")
 
 
 if __name__ == "__main__":
