@@ -5,7 +5,7 @@ Source: `docs/product/prd.md`, `docs/engineering/architecture.md`, `docs/roadmap
 ## Doing
 
 - [ ] Manual verification: paste into one browser field and one editor/text area; HITL local STT latency/accuracy bakeoff.
-- [ ] Near-instant dictation: stage timing, local/Groq fast profiles, and benchmark harness before daemon/streaming work.
+- [x] Near-instant dictation: stage timing, local/Groq fast profiles, and benchmark harness before daemon/streaming work.
 
 ## Backlog
 
@@ -566,11 +566,11 @@ Add a command that runs comparable samples through local models and Groq, record
 
 #### Acceptance criteria
 
-- [ ] A command can benchmark at least `tiny.en`, `base.en`, and the configured Groq model against the same audio files.
-- [ ] Results include total latency, STT latency, provider/model, transcript, and insertion-skipped mode.
-- [ ] Benchmark mode never pastes into the focused app.
-- [ ] Benchmark output can be saved locally without committing audio or transcripts.
-- [ ] Documentation explains the HITL phrase set and how to compare speed against accuracy.
+- [x] A command can benchmark at least `tiny.en`, `base.en`, and the configured Groq model against the same audio files.
+- [x] Results include total latency, STT latency, provider/model, transcript, and insertion-skipped mode.
+- [x] Benchmark mode never pastes into the focused app.
+- [x] Benchmark output can be saved locally without committing audio or transcripts.
+- [x] Documentation explains the HITL phrase set and how to compare speed against accuracy.
 
 #### Implementation notes
 

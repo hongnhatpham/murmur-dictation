@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import sqlite3
 import sys
 import time
 import traceback
+from dataclasses import replace
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from pathlib import Path
@@ -88,6 +90,15 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("provider-profile", help="switch between local and Groq provider presets")
     p.add_argument("profile", choices=["local", "groq", "cloud"], help="cloud is a compatibility alias for groq")
     p.set_defaults(func=cmd_provider_profile)
+
+    p = sub.add_parser("benchmark", help="benchmark local and Groq STT against existing audio files")
+    p.add_argument("audio", nargs="+", type=Path, help="audio files to transcribe; benchmark never pastes")
+    p.add_argument("--local-model", action="append", dest="local_models", help="local faster-whisper model to test; repeatable")
+    p.add_argument("--groq-model", help="Groq STT model to test; defaults to configured Groq model or whisper-large-v3-turbo")
+    p.add_argument("--skip-groq", action="store_true", help="only run local models")
+    p.add_argument("--language", help="override STT language hint for benchmark runs")
+    p.add_argument("--output", type=Path, help="write JSONL benchmark results locally")
+    p.set_defaults(func=cmd_benchmark)
 
     p = sub.add_parser("usage", help="show approximate provider usage and cost")
     p.add_argument("--days", type=int, default=1)
@@ -281,6 +292,84 @@ def cmd_provider_profile(args: argparse.Namespace) -> int:
     alias = " (cloud alias)" if args.profile == "cloud" else ""
     print(f"{profile} profile{alias} written to {cfg.config_path}; correction.enabled=false")
     return 0
+
+
+def cmd_benchmark(args: argparse.Namespace) -> int:
+    cfg = load_config()
+    ensure_local_dirs(cfg)
+    audio_paths = [path.expanduser() for path in args.audio]
+    missing = [str(path) for path in audio_paths if not path.exists()]
+    if missing:
+        print(f"murmur: audio file not found: {', '.join(missing)}", file=sys.stderr)
+        return 1
+
+    personal = PersonalStore(cfg.paths.personal_path)
+    terms = [term.term for term in personal.list_terms()]
+    rows: list[dict[str, object]] = []
+    for audio_path in audio_paths:
+        for provider, model in _benchmark_profiles(cfg, args):
+            language = args.language or ("en" if provider == "groq" and cfg.stt.language == "auto" else cfg.stt.language)
+            bench_stt = replace(cfg.stt, provider=provider, model=model, language=language)
+            start = time.perf_counter()
+            stt_start = time.perf_counter()
+            transcript = ""
+            error: str | None = None
+            provider_name = provider
+            status = "ok"
+            try:
+                tx = transcribe(audio_path, bench_stt, dictionary_terms=terms)
+                provider_name = tx.provider
+                transcript = tx.text
+            except SttError as exc:
+                status = "failed"
+                error = str(exc)
+            stt_latency_ms = _elapsed_ms(stt_start)
+            total_latency_ms = _elapsed_ms(start)
+            rows.append(
+                {
+                    "audio": str(audio_path),
+                    "provider": provider_name,
+                    "model": model,
+                    "status": status,
+                    "total_latency_ms": total_latency_ms,
+                    "stt_latency_ms": stt_latency_ms,
+                    "insertion_status": "skipped",
+                    "transcript": transcript,
+                    "error": error,
+                }
+            )
+
+    print(_format_benchmark_rows(rows))
+    if args.output:
+        output_path = args.output.expanduser()
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        with output_path.open("w", encoding="utf-8") as fh:
+            for row in rows:
+                fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+        print(f"saved={output_path}")
+    return 0 if any(row["status"] == "ok" for row in rows) else 1
+
+
+def _benchmark_profiles(cfg, args: argparse.Namespace) -> list[tuple[str, str]]:
+    local_models = args.local_models or ["tiny.en", "base.en"]
+    profiles = [("faster-whisper", str(model)) for model in local_models]
+    if not args.skip_groq:
+        groq_model = args.groq_model or (cfg.stt.model if cfg.stt.provider == "groq" else "whisper-large-v3-turbo")
+        profiles.append(("groq", str(groq_model)))
+    return profiles
+
+
+def _format_benchmark_rows(rows: list[dict[str, object]]) -> str:
+    lines = []
+    for row in rows:
+        error = f" error={row['error']}" if row.get("error") else ""
+        transcript = json.dumps(str(row.get("transcript") or ""), ensure_ascii=False)
+        lines.append(
+            f"audio={row['audio']} provider={row['provider']} model={row['model']} "
+            f"status={row['status']} total_ms={row['total_latency_ms']} stt_ms={row['stt_latency_ms']} "
+            f"insertion={row['insertion_status']}{error} transcript={transcript}"
+        )
+    return "\n".join(lines)
 
 
 def _set_toml_value(text: str, section: str, key: str, value: str) -> str:

@@ -77,6 +77,32 @@ python -m murmur provider-profile groq
 
 `python -m murmur provider-profile cloud` remains as a compatibility alias for `groq`; it does not mean broad cloud-provider support. Run `python -m murmur doctor` after switching. Doctor reports whether the selected local package/model or Groq key is available without printing API key values.
 
+## Local/Groq benchmark harness
+
+Benchmark existing audio files without pasting into the focused app:
+
+```sh
+python -m murmur benchmark sample1.wav sample2.wav --output tmp/murmur-benchmark.jsonl
+```
+
+Default benchmark profiles:
+
+- local `faster-whisper` `tiny.en`
+- local `faster-whisper` `base.en`
+- Groq `whisper-large-v3-turbo` or the configured Groq STT model
+
+Results print provider, model, total latency, STT latency, `insertion=skipped`, status, and transcript. Saving to `tmp/` keeps benchmark JSONL output under the repo's ignored scratch path; do not commit personal audio or transcript outputs.
+
+Suggested HITL phrase set:
+
+- project/app names: `Murmur`, `Niri`, `Quickshell`, `Codeberg`, `Groq`
+- code-ish terms: `faster-whisper`, `whisper.cpp`, `JSONL`, `SQLite`, `provider-profile`
+- casual message: a short chat reply with contractions and slang
+- docs/email sentence: a complete sentence with punctuation
+- command phrase: a message ending with `press enter`
+
+Compare speed first with `total_ms` and `stt_ms`, then judge transcripts manually for names, tool casing, punctuation, and whether `press enter` is recognized cleanly enough for the transform layer.
+
 ## Required local tools
 
 `murmur doctor` checks:
