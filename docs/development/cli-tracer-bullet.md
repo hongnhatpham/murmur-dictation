@@ -11,6 +11,8 @@ murmur dictate --duration 5
 
 Pipeline: `pw-record` → free/local STT → light cleanup/action parsing → `wl-copy` → optional paste simulation → SQLite history.
 
+Murmur records release-to-insert latency plus stage spans for STT, deterministic transform, correction, clipboard copy, paste, and residual overhead where available. Use `murmur metrics --limit 20` for transcript-free latency review.
+
 ## Required local tools
 
 - `pw-record` from PipeWire tools, for recording the default microphone.
@@ -126,8 +128,9 @@ Useful recovery commands:
 
 ```bash
 murmur history
+murmur metrics --limit 20
 murmur recopy-last
 murmur last-transcript
 ```
 
-History records timestamp, mode, provider, raw transcript, final text, insertion status, and error message. It does **not** store audio. Temporary WAV files are deleted unless `--keep-audio` is passed or `privacy.keep_debug_audio = true` is set.
+History records timestamp, mode, provider, raw transcript, final text, insertion status, error message, stage latencies, and failure stage when available. It does **not** store audio. Temporary WAV files are deleted unless `--keep-audio` is passed or `privacy.keep_debug_audio = true` is set.

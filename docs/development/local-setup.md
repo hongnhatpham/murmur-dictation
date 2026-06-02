@@ -10,6 +10,7 @@ From the repository:
 python -m murmur doctor
 python -m murmur init
 python -m murmur history --limit 10
+python -m murmur metrics --limit 20
 python -m murmur recopy-last
 python -m murmur last-transcript
 python -m murmur start-recording --paste
@@ -163,6 +164,7 @@ History is SQLite and stores text only:
 - final text
 - insertion status
 - error message
+- release-to-insert latency and stage latencies for STT, deterministic transform, correction, clipboard copy, paste, overhead, and failure stage when available
 
 It does not store audio or secrets. Captured audio lives under the debug audio cache only while needed for transcription, unless `--keep-audio` or `[privacy].keep_debug_audio = true` is enabled. Use `keep_audio_days` or `murmur cleanup-audio --keep-days N` to prune retained audio.
 
@@ -170,10 +172,13 @@ Commands:
 
 ```sh
 python -m murmur history --limit 20
+python -m murmur metrics --limit 20
 python -m murmur recopy-last
 python -m murmur last-transcript
 python -m murmur cleanup-audio --keep-days 0
 ```
+
+`murmur metrics` prints recent latency summaries without transcript or final-text content, so it is safe for quick performance review and provider comparison.
 
 Disable history in private mode:
 

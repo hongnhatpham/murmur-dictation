@@ -29,6 +29,8 @@ class InsertionResult:
     message: str = ""
     paste_attempted: bool = False
     enter_sent: bool = False
+    clipboard_latency_ms: int | None = None
+    paste_latency_ms: int | None = None
 
 
 class InsertionError(RuntimeError):
@@ -286,16 +288,22 @@ def insert_text(
             previous_text = ""
         text = format_for_previous_text(text, previous_text, auto_leading_space=getattr(config, "auto_leading_space", True))
 
+    clipboard_latency_ms: int | None = None
+    paste_latency_ms: int | None = None
+
     if text:
+        copy_start = time.perf_counter()
         clipboard.copy(text)
+        clipboard_latency_ms = int((time.perf_counter() - copy_start) * 1000)
     if not paste:
-        return InsertionResult(status="copied-only", message="Copied to clipboard")
+        return InsertionResult(status="copied-only", message="Copied to clipboard", clipboard_latency_ms=clipboard_latency_ms)
 
     if simulator is None or not simulator.available():
         return InsertionResult(
             status="copied-only",
             message="Copied to clipboard; install wtype or ydotool to paste into the focused app.",
             paste_attempted=False,
+            clipboard_latency_ms=clipboard_latency_ms,
         )
 
     paste_attempted = False
@@ -304,18 +312,35 @@ def insert_text(
         try:
             if text:
                 paste_attempted = True
+                paste_start = time.perf_counter()
                 if isinstance(simulator, ToolSimulator):
                     simulator.paste(terminal=terminal)
                 else:
                     simulator.paste()
                 time.sleep(0.08)
+                paste_latency_ms = int((time.perf_counter() - paste_start) * 1000)
             if _has_enter_action(actions):
+                enter_start = time.perf_counter()
                 simulator.press_enter()
                 enter_sent = True
+                paste_latency_ms = (paste_latency_ms or 0) + int((time.perf_counter() - enter_start) * 1000)
         finally:
             if isinstance(simulator, ToolSimulator):
                 simulator.release_modifiers()
     except InsertionError as exc:
-        return InsertionResult(status="copied-only", message=f"Copied to clipboard; paste failed: {exc}", paste_attempted=paste_attempted)
+        return InsertionResult(
+            status="copied-only",
+            message=f"Copied to clipboard; paste failed: {exc}",
+            paste_attempted=paste_attempted,
+            clipboard_latency_ms=clipboard_latency_ms,
+            paste_latency_ms=paste_latency_ms,
+        )
 
-    return InsertionResult(status="pasted", message="Pasted", paste_attempted=paste_attempted, enter_sent=enter_sent)
+    return InsertionResult(
+        status="pasted",
+        message="Pasted",
+        paste_attempted=paste_attempted,
+        enter_sent=enter_sent,
+        clipboard_latency_ms=clipboard_latency_ms,
+        paste_latency_ms=paste_latency_ms,
+    )

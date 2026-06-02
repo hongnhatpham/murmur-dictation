@@ -518,11 +518,11 @@ Record timing spans for each hot-path stage so local and Groq latency can be opt
 
 #### Acceptance criteria
 
-- [ ] Each dictation records release-to-insert total latency.
-- [ ] History records STT latency, transform latency, correction latency, clipboard latency, paste latency, and cleanup/fallback overhead where available.
-- [ ] `murmur history` or a new metrics command can show recent latency summaries without exposing transcript content.
-- [ ] Failed dictations still record the stage that failed and elapsed time before failure.
-- [ ] Unit tests cover timing serialization and concise formatting.
+- [x] Each dictation records release-to-insert total latency.
+- [x] History records STT latency, transform latency, correction latency, clipboard latency, paste latency, and cleanup/fallback overhead where available.
+- [x] `murmur history` or a new metrics command can show recent latency summaries without exposing transcript content.
+- [x] Failed dictations still record the stage that failed and elapsed time before failure.
+- [x] Unit tests cover timing serialization and concise formatting.
 
 #### Implementation notes
 

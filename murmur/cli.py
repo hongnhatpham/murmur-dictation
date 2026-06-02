@@ -18,7 +18,7 @@ from .context import current_app_context
 from .correction import correct_text, warm_correction_model
 from .doctor import format_checks, has_required_failures, run_checks
 from .errors import MurmurError
-from .history import HistoryStore, format_entries
+from .history import HistoryStore, format_entries, format_latency_metrics
 from .insertion import InsertionError, copy_selection_to_clipboard, copy_to_clipboard, insert_text, read_clipboard
 from .notify import notify
 from .personal import PersonalStore, format_snippets, format_terms, format_vocabulary_misses, likely_vocabulary_misses
@@ -157,6 +157,10 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("history", help="show recent dictations")
     p.add_argument("--limit", type=int, default=10)
     p.set_defaults(func=cmd_history)
+
+    p = sub.add_parser("metrics", help="show recent latency summaries without transcript text")
+    p.add_argument("--limit", type=int, default=20)
+    p.set_defaults(func=cmd_metrics)
 
     p = sub.add_parser("recopy-last", help="copy the last final text back to clipboard")
     p.set_defaults(func=cmd_recopy_last)
@@ -345,6 +349,20 @@ def _cleanup_processed_audio(cfg, audio_path: Path, *, keep_audio: bool) -> None
         debug_log(f"audio cleanup removed={result.removed} freed_bytes={result.freed_bytes}")
 
 
+def _elapsed_ms(start: float) -> int:
+    return int((time.perf_counter() - start) * 1000)
+
+
+def _overhead_latency_ms(
+    total_latency_ms: int | None,
+    *stages: int | None,
+) -> int | None:
+    if total_latency_ms is None:
+        return None
+    known = sum(stage for stage in stages if stage is not None)
+    return max(total_latency_ms - known, 0)
+
+
 def _process_audio(
     *,
     cfg,
@@ -353,12 +371,24 @@ def _process_audio(
     paste: bool,
     duration_ms: int | None = None,
     start: float | None = None,
+    recorder_stop_latency_ms: int | None = None,
 ) -> int:
     store = HistoryStore(cfg.paths.history_path)
     transcript_text = ""
+    deterministic_text = ""
     final_text = ""
     provider = cfg.stt.provider
     start = start or time.perf_counter()
+    stage = "validate"
+    stage_start = start
+    stt_latency_ms: int | None = None
+    transform_latency_ms: int | None = None
+    clipboard_latency_ms: int | None = None
+    paste_latency_ms: int | None = None
+    correction_provider = "deterministic"
+    correction_status = "skipped"
+    correction_latency_ms: int | None = None
+    correction_error: str | None = None
     try:
         if not audio_path.exists() or audio_path.stat().st_size == 0:
             raise MurmurError(
@@ -371,9 +401,14 @@ def _process_audio(
         term_entries = personal.list_terms()
         terms = [term.term for term in term_entries]
         snippets = personal.snippet_map()
+        stage = "stt"
+        stage_start = time.perf_counter()
         tx = transcribe(audio_path, cfg.stt, dictionary_terms=terms)
+        stt_latency_ms = _elapsed_ms(stage_start)
         provider = tx.provider
         transcript_text = tx.text
+        stage = "transform"
+        stage_start = time.perf_counter()
         transformed = transform_transcript(
             transcript_text,
             mode=mode,
@@ -384,7 +419,11 @@ def _process_audio(
         app_context = current_app_context(cfg.context)
         style = style_for_category(app_context.category, cfg.styles)
         styled_text = apply_style(transformed.final_text, style)
+        deterministic_text = styled_text
         skip_reason = _correction_skip_reason(cfg, app_context.category, duration_ms)
+        transform_latency_ms = _elapsed_ms(stage_start)
+        stage = "correction"
+        stage_start = time.perf_counter()
         if skip_reason:
             correction = SimpleNamespace(
                 final_text=styled_text,
@@ -403,27 +442,50 @@ def _process_audio(
                 dictionary_terms=terms,
                 style=style.settings,
             )
+        correction_provider = correction.provider
+        correction_status = correction.status
+        correction_latency_ms = correction.latency_ms
+        correction_error = correction.error
         final_text = correction.final_text
+        stage = "insertion"
+        stage_start = time.perf_counter()
         result = insert_text(final_text, transformed.actions, cfg.insertion, paste=paste)
-        latency_ms = int((time.perf_counter() - start) * 1000)
+        clipboard_latency_ms = result.clipboard_latency_ms
+        paste_latency_ms = result.paste_latency_ms
+        latency_ms = _elapsed_ms(start)
+        overhead_latency_ms = _overhead_latency_ms(
+            latency_ms,
+            recorder_stop_latency_ms,
+            stt_latency_ms,
+            transform_latency_ms,
+            correction_latency_ms,
+            clipboard_latency_ms,
+            paste_latency_ms,
+        )
         if cfg.privacy.history:
             store.add(
                 mode=mode,
                 provider=provider,
                 transcript=transcript_text,
-                deterministic_text=styled_text,
+                deterministic_text=deterministic_text,
                 final_text=final_text,
-                correction_provider=correction.provider,
-                correction_status=correction.status,
-                correction_latency_ms=correction.latency_ms,
+                correction_provider=correction_provider,
+                correction_status=correction_status,
+                correction_latency_ms=correction_latency_ms,
                 focused_app_id=app_context.focused_app_id,
                 app_category=app_context.category,
                 style_applied=style.name,
-                correction_error=correction.error,
+                correction_error=correction_error,
                 actions=transformed.actions,
                 insertion_status=result.status,
                 audio_duration_ms=duration_ms,
                 latency_ms=latency_ms,
+                recorder_stop_latency_ms=recorder_stop_latency_ms,
+                stt_latency_ms=stt_latency_ms,
+                transform_latency_ms=transform_latency_ms,
+                clipboard_latency_ms=clipboard_latency_ms,
+                paste_latency_ms=paste_latency_ms,
+                overhead_latency_ms=overhead_latency_ms,
             )
         notify("Inserted" if result.status == "pasted" else "Copied", result.message)
         write_status(cfg.paths.state_dir, "inserted" if result.status == "pasted" else "copied", result.message, ttl_seconds=2.5)
@@ -432,16 +494,43 @@ def _process_audio(
         return 0
     except (MurmurError, SttError, InsertionError) as exc:
         debug_log(f"process_audio failed: {exc!r}")
+        elapsed_ms = _elapsed_ms(start)
+        if stage == "stt" and stt_latency_ms is None:
+            stt_latency_ms = _elapsed_ms(stage_start)
+        elif stage == "transform" and transform_latency_ms is None:
+            transform_latency_ms = _elapsed_ms(stage_start)
+        elif stage == "insertion":
+            paste_latency_ms = _elapsed_ms(stage_start)
+        overhead_latency_ms = _overhead_latency_ms(
+            elapsed_ms,
+            recorder_stop_latency_ms,
+            stt_latency_ms,
+            transform_latency_ms,
+            correction_latency_ms,
+            clipboard_latency_ms,
+            paste_latency_ms,
+        )
         if cfg.privacy.history:
             store.add(
                 mode=mode,
                 provider=provider,
                 transcript=transcript_text or None,
-                deterministic_text=final_text or None,
+                deterministic_text=deterministic_text or final_text or None,
                 final_text=final_text or None,
-                correction_provider="deterministic",
-                correction_status="failed" if final_text else "skipped",
+                correction_provider=correction_provider,
+                correction_status="failed" if final_text else correction_status,
+                correction_latency_ms=correction_latency_ms,
+                correction_error=correction_error,
                 insertion_status="failed",
+                audio_duration_ms=duration_ms,
+                latency_ms=elapsed_ms,
+                recorder_stop_latency_ms=recorder_stop_latency_ms,
+                stt_latency_ms=stt_latency_ms,
+                transform_latency_ms=transform_latency_ms,
+                clipboard_latency_ms=clipboard_latency_ms,
+                paste_latency_ms=paste_latency_ms,
+                overhead_latency_ms=overhead_latency_ms,
+                failure_stage=stage,
                 error_message=str(exc),
             )
         notify("Failed", str(exc))
@@ -466,13 +555,12 @@ def cmd_dictate(args: argparse.Namespace) -> int:
     ensure_local_dirs(cfg)
     mode = args.mode or cfg.cleanup.default_mode
     audio_path: Path | None = None
-    start = time.perf_counter()
     try:
         if args.audio:
             audio_path = args.audio.expanduser()
             if not audio_path.exists():
                 raise MurmurError(f"Audio file not found: {audio_path}")
-            return _process_audio(cfg=cfg, audio_path=audio_path, mode=mode, paste=args.paste, start=start)
+            return _process_audio(cfg=cfg, audio_path=audio_path, mode=mode, paste=args.paste, start=time.perf_counter())
 
         cfg.paths.debug_audio_dir.mkdir(parents=True, exist_ok=True)
         audio_path = cfg.paths.debug_audio_dir / f"murmur-{int(time.time() * 1000)}.wav"
@@ -481,7 +569,7 @@ def cmd_dictate(args: argparse.Namespace) -> int:
         rec_start = time.perf_counter()
         record_audio(audio_path, args.duration)
         duration_ms = int((time.perf_counter() - rec_start) * 1000)
-        rc = _process_audio(cfg=cfg, audio_path=audio_path, mode=mode, paste=args.paste, duration_ms=duration_ms, start=start)
+        rc = _process_audio(cfg=cfg, audio_path=audio_path, mode=mode, paste=args.paste, duration_ms=duration_ms, start=time.perf_counter())
         if rc == 0:
             _cleanup_processed_audio(cfg, audio_path, keep_audio=(args.keep_audio or cfg.privacy.keep_debug_audio))
         return rc
@@ -535,9 +623,13 @@ def cmd_stop_recording(args: argparse.Namespace) -> int:
         print(f"murmur: {exc.doctor()}", file=sys.stderr)
         return 1
     try:
+        release_start = time.perf_counter()
+        recorder_stop_latency_ms: int | None = None
         try:
             session = load_active_session(cfg.paths.state_dir)
+            stop_start = time.perf_counter()
             stop_recording_process(session)
+            recorder_stop_latency_ms = _elapsed_ms(stop_start)
             clear_session(cfg.paths.state_dir)
         except MurmurError as exc:
             debug_log(f"stop-recording failed before processing: {exc.doctor()}")
@@ -553,7 +645,15 @@ def cmd_stop_recording(args: argparse.Namespace) -> int:
         paste = False if args.no_paste else (args.paste or session.paste)
         duration_ms = int((time.time() - session.started_at) * 1000)
         keep_audio = args.keep_audio or session.keep_audio or cfg.privacy.keep_debug_audio
-        rc = _process_audio(cfg=cfg, audio_path=session.audio_path, mode=mode, paste=paste, duration_ms=duration_ms)
+        rc = _process_audio(
+            cfg=cfg,
+            audio_path=session.audio_path,
+            mode=mode,
+            paste=paste,
+            duration_ms=duration_ms,
+            start=release_start,
+            recorder_stop_latency_ms=recorder_stop_latency_ms,
+        )
         if rc == 0:
             _cleanup_processed_audio(cfg, session.audio_path, keep_audio=keep_audio)
         return rc
@@ -616,7 +716,9 @@ def _cmd_insert_text(args: argparse.Namespace, *, paste: bool) -> int:
     cfg = load_config()
     mode = args.mode or cfg.cleanup.default_mode
     transcript_text = " ".join(args.text)
+    start = time.perf_counter()
     personal = PersonalStore(cfg.paths.personal_path)
+    transform_start = time.perf_counter()
     transformed = transform_transcript(
         transcript_text,
         mode=mode,
@@ -627,7 +729,15 @@ def _cmd_insert_text(args: argparse.Namespace, *, paste: bool) -> int:
     app_context = current_app_context(cfg.context)
     style = style_for_category(app_context.category, cfg.styles)
     final_text = apply_style(transformed.final_text, style)
+    transform_latency_ms = _elapsed_ms(transform_start)
     result = insert_text(final_text, transformed.actions, cfg.insertion, paste=paste)
+    latency_ms = _elapsed_ms(start)
+    overhead_latency_ms = _overhead_latency_ms(
+        latency_ms,
+        transform_latency_ms,
+        result.clipboard_latency_ms,
+        result.paste_latency_ms,
+    )
     if cfg.privacy.history and not args.private:
         HistoryStore(cfg.paths.history_path).add(
             mode=mode,
@@ -642,6 +752,11 @@ def _cmd_insert_text(args: argparse.Namespace, *, paste: bool) -> int:
             style_applied=style.name,
             actions=transformed.actions,
             insertion_status=result.status,
+            latency_ms=latency_ms,
+            transform_latency_ms=transform_latency_ms,
+            clipboard_latency_ms=result.clipboard_latency_ms,
+            paste_latency_ms=result.paste_latency_ms,
+            overhead_latency_ms=overhead_latency_ms,
         )
     print(final_text)
     print(f"[{result.status}] {result.message}", file=sys.stderr)
@@ -654,6 +769,8 @@ def cmd_command(args: argparse.Namespace) -> int:
     audio_path: Path | None = None
     transcript_text = ""
     provider = cfg.stt.provider
+    start = time.perf_counter()
+    stt_latency_ms: int | None = None
 
     try:
         if args.selection:
@@ -687,10 +804,13 @@ def cmd_command(args: argparse.Namespace) -> int:
             notify("Processing command")
             write_status(cfg.paths.state_dir, "processing", "Command", ttl_seconds=30)
             personal = PersonalStore(cfg.paths.personal_path)
+            stt_start = time.perf_counter()
             tx = transcribe(audio_path, cfg.stt, dictionary_terms=[term.term for term in personal.list_terms()])
+            stt_latency_ms = _elapsed_ms(stt_start)
             provider = tx.provider
             transcript_text = tx.text
 
+        transform_start = time.perf_counter()
         routed = route_command_transform(transcript_text, selected_text)
         if not routed.supported:
             print(f"murmur: {routed.message}", file=sys.stderr)
@@ -700,7 +820,16 @@ def cmd_command(args: argparse.Namespace) -> int:
         app_context = current_app_context(cfg.context)
         style = style_for_category(app_context.category, cfg.styles)
         final_text = apply_style(routed.final_text, style)
+        transform_latency_ms = _elapsed_ms(transform_start)
         result = insert_text(final_text, [], cfg.insertion, paste=(args.paste or args.selection))
+        latency_ms = _elapsed_ms(start)
+        overhead_latency_ms = _overhead_latency_ms(
+            latency_ms,
+            stt_latency_ms,
+            transform_latency_ms,
+            result.clipboard_latency_ms,
+            result.paste_latency_ms,
+        )
         if cfg.privacy.history:
             HistoryStore(cfg.paths.history_path).add(
                 mode=f"command:{routed.command}",
@@ -715,6 +844,12 @@ def cmd_command(args: argparse.Namespace) -> int:
                 style_applied=style.name,
                 actions=[],
                 insertion_status=result.status,
+                latency_ms=latency_ms,
+                stt_latency_ms=stt_latency_ms,
+                transform_latency_ms=transform_latency_ms,
+                clipboard_latency_ms=result.clipboard_latency_ms,
+                paste_latency_ms=result.paste_latency_ms,
+                overhead_latency_ms=overhead_latency_ms,
             )
         notify("Command applied" if result.status == "pasted" else "Command copied", result.message)
         write_status(cfg.paths.state_dir, "inserted" if result.status == "pasted" else "copied", result.message, ttl_seconds=2.5)
@@ -761,6 +896,13 @@ def cmd_history(args: argparse.Namespace) -> int:
     cfg = load_config()
     ensure_local_dirs(cfg)
     print(format_entries(HistoryStore(cfg.paths.history_path).recent(args.limit)))
+    return 0
+
+
+def cmd_metrics(args: argparse.Namespace) -> int:
+    cfg = load_config()
+    ensure_local_dirs(cfg)
+    print(format_latency_metrics(HistoryStore(cfg.paths.history_path).recent(args.limit)))
     return 0
 
 

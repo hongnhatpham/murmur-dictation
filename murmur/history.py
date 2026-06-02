@@ -30,6 +30,13 @@ CREATE TABLE IF NOT EXISTS dictations (
     insertion_status TEXT NOT NULL DEFAULT 'unknown',
     audio_duration_ms INTEGER,
     latency_ms INTEGER,
+    recorder_stop_latency_ms INTEGER,
+    stt_latency_ms INTEGER,
+    transform_latency_ms INTEGER,
+    clipboard_latency_ms INTEGER,
+    paste_latency_ms INTEGER,
+    overhead_latency_ms INTEGER,
+    failure_stage TEXT,
     error_message TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_dictations_created_at ON dictations(created_at DESC);
@@ -56,6 +63,13 @@ class HistoryEntry:
     correction_error: str | None = None
     audio_duration_ms: int | None = None
     latency_ms: int | None = None
+    recorder_stop_latency_ms: int | None = None
+    stt_latency_ms: int | None = None
+    transform_latency_ms: int | None = None
+    clipboard_latency_ms: int | None = None
+    paste_latency_ms: int | None = None
+    overhead_latency_ms: int | None = None
+    failure_stage: str | None = None
 
 
 @dataclass(frozen=True)
@@ -127,6 +141,13 @@ class HistoryStore:
         app_category: str | None = None,
         style_applied: str | None = None,
         correction_error: str | None = None,
+        recorder_stop_latency_ms: int | None = None,
+        stt_latency_ms: int | None = None,
+        transform_latency_ms: int | None = None,
+        clipboard_latency_ms: int | None = None,
+        paste_latency_ms: int | None = None,
+        overhead_latency_ms: int | None = None,
+        failure_stage: str | None = None,
     ) -> int:
         timestamp = created_at or datetime.now(timezone.utc).isoformat(timespec="seconds")
         action_text = ",".join(getattr(a, "name", str(a)) for a in (actions or []))
@@ -135,8 +156,8 @@ class HistoryStore:
             cur = conn.execute(
                 """
                 INSERT INTO dictations
-                (created_at, mode, provider, transcript, deterministic_text, final_text, correction_provider, correction_status, correction_latency_ms, focused_app_id, app_category, style_applied, correction_error, actions, insertion_status, audio_duration_ms, latency_ms, error_message)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (created_at, mode, provider, transcript, deterministic_text, final_text, correction_provider, correction_status, correction_latency_ms, focused_app_id, app_category, style_applied, correction_error, actions, insertion_status, audio_duration_ms, latency_ms, recorder_stop_latency_ms, stt_latency_ms, transform_latency_ms, clipboard_latency_ms, paste_latency_ms, overhead_latency_ms, failure_stage, error_message)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     timestamp,
@@ -156,6 +177,13 @@ class HistoryStore:
                     insertion_status,
                     audio_duration_ms,
                     latency_ms,
+                    recorder_stop_latency_ms,
+                    stt_latency_ms,
+                    transform_latency_ms,
+                    clipboard_latency_ms,
+                    paste_latency_ms,
+                    overhead_latency_ms,
+                    failure_stage,
                     error_message or error,
                 ),
             )
@@ -169,7 +197,7 @@ class HistoryStore:
         try:
             rows = conn.execute(
                 """
-                SELECT id, created_at, mode, provider, transcript, deterministic_text, final_text, correction_provider, correction_status, correction_latency_ms, focused_app_id, app_category, style_applied, correction_error, audio_duration_ms, latency_ms, insertion_status, error_message
+                SELECT id, created_at, mode, provider, transcript, deterministic_text, final_text, correction_provider, correction_status, correction_latency_ms, focused_app_id, app_category, style_applied, correction_error, audio_duration_ms, latency_ms, recorder_stop_latency_ms, stt_latency_ms, transform_latency_ms, clipboard_latency_ms, paste_latency_ms, overhead_latency_ms, failure_stage, insertion_status, error_message
                 FROM dictations
                 ORDER BY id DESC
                 LIMIT ?
@@ -191,6 +219,13 @@ def _ensure_columns(conn: sqlite3.Connection) -> None:
         "actions": "ALTER TABLE dictations ADD COLUMN actions TEXT NOT NULL DEFAULT ''",
         "audio_duration_ms": "ALTER TABLE dictations ADD COLUMN audio_duration_ms INTEGER",
         "latency_ms": "ALTER TABLE dictations ADD COLUMN latency_ms INTEGER",
+        "recorder_stop_latency_ms": "ALTER TABLE dictations ADD COLUMN recorder_stop_latency_ms INTEGER",
+        "stt_latency_ms": "ALTER TABLE dictations ADD COLUMN stt_latency_ms INTEGER",
+        "transform_latency_ms": "ALTER TABLE dictations ADD COLUMN transform_latency_ms INTEGER",
+        "clipboard_latency_ms": "ALTER TABLE dictations ADD COLUMN clipboard_latency_ms INTEGER",
+        "paste_latency_ms": "ALTER TABLE dictations ADD COLUMN paste_latency_ms INTEGER",
+        "overhead_latency_ms": "ALTER TABLE dictations ADD COLUMN overhead_latency_ms INTEGER",
+        "failure_stage": "ALTER TABLE dictations ADD COLUMN failure_stage TEXT",
         "deterministic_text": "ALTER TABLE dictations ADD COLUMN deterministic_text TEXT",
         "correction_provider": "ALTER TABLE dictations ADD COLUMN correction_provider TEXT",
         "correction_status": "ALTER TABLE dictations ADD COLUMN correction_status TEXT NOT NULL DEFAULT 'skipped'",
@@ -224,6 +259,13 @@ def _entry(row: sqlite3.Row) -> HistoryEntry:
         correction_error=row["correction_error"],
         audio_duration_ms=row["audio_duration_ms"],
         latency_ms=row["latency_ms"],
+        recorder_stop_latency_ms=row["recorder_stop_latency_ms"],
+        stt_latency_ms=row["stt_latency_ms"],
+        transform_latency_ms=row["transform_latency_ms"],
+        clipboard_latency_ms=row["clipboard_latency_ms"],
+        paste_latency_ms=row["paste_latency_ms"],
+        overhead_latency_ms=row["overhead_latency_ms"],
+        failure_stage=row["failure_stage"],
     )
 
 
@@ -277,3 +319,45 @@ def format_entries(entries: Iterable[HistoryEntry]) -> str:
             f"status={e.insertion_status}{correction}{category}{error}  {text}"
         )
     return "\n".join(lines)
+
+
+def format_latency_metrics(entries: Iterable[HistoryEntry]) -> str:
+    items = [entry for entry in entries if entry.latency_ms is not None or entry.stt_latency_ms is not None]
+    if not items:
+        return "No latency data."
+    lines = [_format_latency_rollup(items)]
+    for entry in items:
+        failed = f" failed_stage={entry.failure_stage}" if entry.failure_stage else ""
+        lines.append(
+            f"{entry.id:>4}  {entry.created_at}  mode={entry.mode} provider={entry.provider} "
+            f"status={entry.insertion_status}{failed} "
+            f"total={_ms(entry.latency_ms)} audio={_ms(entry.audio_duration_ms)} stop={_ms(entry.recorder_stop_latency_ms)} "
+            f"stt={_ms(entry.stt_latency_ms)} transform={_ms(entry.transform_latency_ms)} "
+            f"correction={_ms(entry.correction_latency_ms)} clipboard={_ms(entry.clipboard_latency_ms)} "
+            f"paste={_ms(entry.paste_latency_ms)} overhead={_ms(entry.overhead_latency_ms)}"
+        )
+    return "\n".join(lines)
+
+
+def _format_latency_rollup(entries: list[HistoryEntry]) -> str:
+    return (
+        f"count={len(entries)} "
+        f"avg_total={_avg_ms(entry.latency_ms for entry in entries)} "
+        f"avg_stt={_avg_ms(entry.stt_latency_ms for entry in entries)} "
+        f"avg_transform={_avg_ms(entry.transform_latency_ms for entry in entries)} "
+        f"avg_correction={_avg_ms(entry.correction_latency_ms for entry in entries)} "
+        f"avg_clipboard={_avg_ms(entry.clipboard_latency_ms for entry in entries)} "
+        f"avg_paste={_avg_ms(entry.paste_latency_ms for entry in entries)} "
+        f"avg_overhead={_avg_ms(entry.overhead_latency_ms for entry in entries)}"
+    )
+
+
+def _avg_ms(values: Iterable[int | None]) -> str:
+    present = [value for value in values if value is not None]
+    if not present:
+        return "-"
+    return f"{int(sum(present) / len(present))}ms"
+
+
+def _ms(value: int | None) -> str:
+    return "-" if value is None else f"{int(value)}ms"
