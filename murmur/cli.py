@@ -85,8 +85,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--keep-days", type=int, default=None, help="override configured audio retention window")
     p.set_defaults(func=cmd_cleanup_audio)
 
-    p = sub.add_parser("provider-profile", help="switch between local and cloud provider presets")
-    p.add_argument("profile", choices=["cloud", "local"])
+    p = sub.add_parser("provider-profile", help="switch between local and Groq provider presets")
+    p.add_argument("profile", choices=["local", "groq", "cloud"], help="cloud is a compatibility alias for groq")
     p.set_defaults(func=cmd_provider_profile)
 
     p = sub.add_parser("usage", help="show approximate provider usage and cost")
@@ -260,11 +260,12 @@ def cmd_provider_profile(args: argparse.Namespace) -> int:
     cfg = load_config()
     cfg.config_path.parent.mkdir(parents=True, exist_ok=True)
     text = cfg.config_path.read_text(encoding="utf-8") if cfg.config_path.exists() else sample_config()
-    if args.profile == "cloud":
+    profile = "groq" if args.profile == "cloud" else args.profile
+    if profile == "groq":
         text = _set_toml_value(text, "stt", "provider", '"groq"')
         text = _set_toml_value(text, "stt", "model", '"whisper-large-v3-turbo"')
         text = _set_toml_value(text, "stt", "language", '"en"')
-        text = _set_toml_value(text, "correction", "enabled", "true")
+        text = _set_toml_value(text, "correction", "enabled", "false")
         text = _set_toml_value(text, "correction", "provider", '"groq"')
         text = _set_toml_value(text, "correction", "model", '"openai/gpt-oss-20b"')
         text = _set_toml_value(text, "correction", "endpoint", '"https://api.groq.com/openai/v1/chat/completions"')
@@ -272,11 +273,13 @@ def cmd_provider_profile(args: argparse.Namespace) -> int:
         text = _set_toml_value(text, "stt", "provider", '"faster-whisper"')
         text = _set_toml_value(text, "stt", "model", '"small.en"')
         text = _set_toml_value(text, "stt", "language", '"en"')
+        text = _set_toml_value(text, "correction", "enabled", "false")
         text = _set_toml_value(text, "correction", "provider", '"ollama"')
         text = _set_toml_value(text, "correction", "model", '"qwen3:1.7b"')
         text = _set_toml_value(text, "correction", "endpoint", '"http://127.0.0.1:11434/api/generate"')
     cfg.config_path.write_text(text, encoding="utf-8")
-    print(f"{args.profile} profile written to {cfg.config_path}")
+    alias = " (cloud alias)" if args.profile == "cloud" else ""
+    print(f"{profile} profile{alias} written to {cfg.config_path}; correction.enabled=false")
     return 0
 
 

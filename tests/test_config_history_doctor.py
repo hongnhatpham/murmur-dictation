@@ -3,9 +3,10 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from murmur.config import load_config
-from murmur.doctor import Check, format_checks, has_required_failures
+from murmur.doctor import Check, format_checks, has_required_failures, run_checks
 from murmur.history import HistoryStore, format_entries
 
 
@@ -70,6 +71,19 @@ history = false
         ]
         self.assertFalse(has_required_failures(checks))
         self.assertIn("[WARN] optional", format_checks(checks))
+
+    def test_doctor_redacts_available_groq_key(self):
+        with tempfile.TemporaryDirectory() as tmpdir_s:
+            config_path = Path(tmpdir_s) / "config.toml"
+            config_path.write_text('[stt]\nprovider = "groq"\n', encoding="utf-8")
+            cfg = load_config(config_path)
+            with patch.dict("os.environ", {"MURMUR_GROQ_API_KEY": "secret-value"}, clear=False):
+                checks = run_checks(cfg)
+
+        groq = next(check for check in checks if check.name == "groq api key")
+        self.assertTrue(groq.ok)
+        self.assertEqual(groq.detail, "key available; value hidden")
+        self.assertNotIn("secret-value", format_checks(checks))
 
 
 if __name__ == "__main__":

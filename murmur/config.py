@@ -301,7 +301,10 @@ def sample_config() -> str:
 # debug_audio_dir = "{defaults.paths.debug_audio_dir}"
 
 [stt]
-# Supported values: "faster-whisper", "whisper-cpp", or opt-in cloud "groq"/"elevenlabs".
+# Near-instant profiles target only local STT and Groq:
+#   murmur provider-profile local
+#   murmur provider-profile groq
+# Supported STT values: "faster-whisper", "whisper-cpp", "groq", or legacy "elevenlabs".
 # Groq requires GROQ_API_KEY/MURMUR_GROQ_API_KEY or ~/.config/murmur/groq_api_key.
 # ElevenLabs requires ELEVENLABS_API_KEY/MURMUR_ELEVENLABS_API_KEY or ~/.config/murmur/elevenlabs_api_key.
 provider = "{defaults.stt.provider}"

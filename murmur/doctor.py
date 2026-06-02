@@ -63,11 +63,13 @@ def run_checks(config: MurmurConfig) -> list[Check]:
     elif config.stt.provider in ("elevenlabs", "eleven-labs", "scribe"):
         key_file = Path(os.environ.get("MURMUR_ELEVENLABS_API_KEY_FILE", config_dir() / "elevenlabs_api_key")).expanduser()
         has_key = bool(os.environ.get("MURMUR_ELEVENLABS_API_KEY") or os.environ.get("ELEVENLABS_API_KEY") or key_file.exists())
-        checks.append(Check("elevenlabs api key", has_key, f"Set ELEVENLABS_API_KEY, MURMUR_ELEVENLABS_API_KEY, or write {key_file}", required=True))
+        detail = "key available; value hidden" if has_key else f"Set ELEVENLABS_API_KEY, MURMUR_ELEVENLABS_API_KEY, or write {key_file}"
+        checks.append(Check("elevenlabs api key", has_key, detail, required=True))
     elif config.stt.provider == "groq":
         key_file = Path(os.environ.get("MURMUR_GROQ_API_KEY_FILE", config_dir() / "groq_api_key")).expanduser()
         has_key = bool(os.environ.get("MURMUR_GROQ_API_KEY") or os.environ.get("GROQ_API_KEY") or key_file.exists())
-        checks.append(Check("groq api key", has_key, f"Set GROQ_API_KEY, MURMUR_GROQ_API_KEY, or write {key_file}", required=True))
+        detail = "key available; value hidden" if has_key else f"Set GROQ_API_KEY, MURMUR_GROQ_API_KEY, or write {key_file}"
+        checks.append(Check("groq api key", has_key, detail, required=True))
     else:
         checks.append(Check("stt provider", False, f"Unsupported provider `{config.stt.provider}`"))
 

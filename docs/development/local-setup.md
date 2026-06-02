@@ -61,6 +61,22 @@ python -m murmur init
 python -m murmur init --overwrite
 ```
 
+## Near-instant provider profiles
+
+The latency track targets two profiles only:
+
+- `local`: local/private `faster-whisper`, deterministic cleanup, AI correction disabled.
+- `groq`: Groq `whisper-large-v3-turbo`, deterministic cleanup, cloud correction disabled.
+
+Switch profiles with:
+
+```sh
+python -m murmur provider-profile local
+python -m murmur provider-profile groq
+```
+
+`python -m murmur provider-profile cloud` remains as a compatibility alias for `groq`; it does not mean broad cloud-provider support. Run `python -m murmur doctor` after switching. Doctor reports whether the selected local package/model or Groq key is available without printing API key values.
+
 ## Required local tools
 
 `murmur doctor` checks:

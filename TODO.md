@@ -542,11 +542,11 @@ Make `local` and `groq` the explicit near-instant profiles. Local stays default/
 
 #### Acceptance criteria
 
-- [ ] `murmur provider-profile local` configures local STT and disables AI correction on the hot path.
-- [ ] `murmur provider-profile groq` configures Groq STT without enabling cloud correction by default.
-- [ ] Config/docs clearly state that near-instant work targets only local and Groq providers.
-- [ ] Doctor output remains actionable for both profiles and never prints API keys.
-- [ ] Existing `cloud` profile behavior is renamed, aliased, or documented so it does not imply broad cloud-provider support.
+- [x] `murmur provider-profile local` configures local STT and disables AI correction on the hot path.
+- [x] `murmur provider-profile groq` configures Groq STT without enabling cloud correction by default.
+- [x] Config/docs clearly state that near-instant work targets only local and Groq providers.
+- [x] Doctor output remains actionable for both profiles and never prints API keys.
+- [x] Existing `cloud` profile behavior is renamed, aliased, or documented so it does not imply broad cloud-provider support.
 
 #### Implementation notes
 
