@@ -34,6 +34,7 @@ It records with `pw-record`, transcribes with a local/free STT backend (`faster-
 - [`docs/setup/wayland-niri.md`](docs/setup/wayland-niri.md) — niri/Wayland hotkey, notification, and user-service setup.
 - [`docs/engineering/adr/0001-continue-python-through-mvp.md`](docs/engineering/adr/0001-continue-python-through-mvp.md) — implementation-language decision.
 - [`docs/engineering/adr/0002-local-stt-first.md`](docs/engineering/adr/0002-local-stt-first.md) — local/free STT provider decision.
+- [`docs/engineering/adr/0003-local-and-groq-near-instant-dictation.md`](docs/engineering/adr/0003-local-and-groq-near-instant-dictation.md) — local/Groq latency strategy.
 
 ## Product principles
 

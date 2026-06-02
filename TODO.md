@@ -1,10 +1,11 @@
 # TODO
 
-Source: `docs/product/prd.md`, `docs/engineering/architecture.md`, `docs/roadmap.md`, conversation research on Wispr Flow
+Source: `docs/product/prd.md`, `docs/engineering/architecture.md`, `docs/roadmap.md`, `docs/engineering/adr/0003-local-and-groq-near-instant-dictation.md`, conversation research on Wispr Flow
 
 ## Doing
 
 - [ ] Manual verification: paste into one browser field and one editor/text area; HITL local STT latency/accuracy bakeoff.
+- [ ] Near-instant dictation: stage timing, local/Groq fast profiles, and benchmark harness before daemon/streaming work.
 
 ## Backlog
 
@@ -504,3 +505,170 @@ Add per-category style presets that shape deterministic cleanup and AI correctio
 #### Implementation notes
 
 - Match Wispr Flow's product shape but keep the implementation local-first and transparent.
+
+### 22. Add stage-level latency instrumentation
+
+- Type: AFK
+- Blocked by: 5. Create the local history and recovery CLI; 16. Add correction trace fields to history
+- User stories covered: Near-instant dictation; latency success metric; provider bakeoff
+
+#### What to build
+
+Record timing spans for each hot-path stage so local and Groq latency can be optimized from evidence rather than total runtime alone.
+
+#### Acceptance criteria
+
+- [ ] Each dictation records release-to-insert total latency.
+- [ ] History records STT latency, transform latency, correction latency, clipboard latency, paste latency, and cleanup/fallback overhead where available.
+- [ ] `murmur history` or a new metrics command can show recent latency summaries without exposing transcript content.
+- [ ] Failed dictations still record the stage that failed and elapsed time before failure.
+- [ ] Unit tests cover timing serialization and concise formatting.
+
+#### Implementation notes
+
+- Keep timing data numeric and SQLite-friendly.
+- Do not add transcript/audio content to metrics output.
+- This is the prerequisite for deciding whether model, daemon startup, insertion, or correction is the real bottleneck.
+
+### 23. Add local and Groq fast profiles
+
+- Type: AFK
+- Blocked by: 22. Add stage-level latency instrumentation
+- User stories covered: Local/private dictation; turbo dictation; configurable providers
+
+#### What to build
+
+Make `local` and `groq` the explicit near-instant profiles. Local stays default/private; Groq is opt-in turbo. Both profiles should keep deterministic cleanup on the hot path and avoid AI correction by default for short dictation.
+
+#### Acceptance criteria
+
+- [ ] `murmur provider-profile local` configures local STT and disables AI correction on the hot path.
+- [ ] `murmur provider-profile groq` configures Groq STT without enabling cloud correction by default.
+- [ ] Config/docs clearly state that near-instant work targets only local and Groq providers.
+- [ ] Doctor output remains actionable for both profiles and never prints API keys.
+- [ ] Existing `cloud` profile behavior is renamed, aliased, or documented so it does not imply broad cloud-provider support.
+
+#### Implementation notes
+
+- Prefer `groq` over generic `cloud` vocabulary for this latency work.
+- Keep provider credentials in environment or local ignored files only.
+- Keep local model files under XDG cache paths.
+
+### 24. Build a local/Groq benchmark harness
+
+- Type: AFK
+- Blocked by: 22. Add stage-level latency instrumentation; 23. Add local and Groq fast profiles
+- User stories covered: HITL latency/accuracy bakeoff; personal vocabulary; provider choice
+
+#### What to build
+
+Add a command that runs comparable samples through local models and Groq, records timing, and prints concise results for a human accuracy pass.
+
+#### Acceptance criteria
+
+- [ ] A command can benchmark at least `tiny.en`, `base.en`, and the configured Groq model against the same audio files.
+- [ ] Results include total latency, STT latency, provider/model, transcript, and insertion-skipped mode.
+- [ ] Benchmark mode never pastes into the focused app.
+- [ ] Benchmark output can be saved locally without committing audio or transcripts.
+- [ ] Documentation explains the HITL phrase set and how to compare speed against accuracy.
+
+#### Implementation notes
+
+- Support existing audio files first; live recording can be a follow-up.
+- Treat accuracy as HITL because the user must judge names, code terms, and mixed casual speech.
+- Reuse dictionary terms so benchmark results match daily-driver behavior.
+
+### 25. Run the local/Groq HITL bakeoff
+
+- Type: HITL
+- Blocked by: 24. Build a local/Groq benchmark harness
+- User stories covered: Basic dictation quality; model selection; latency threshold
+
+#### What to build
+
+Use the benchmark harness with real voice samples to choose daily-driver defaults for local and Groq profiles.
+
+#### Acceptance criteria
+
+- [ ] The same utterance set is tested across local and Groq profiles.
+- [ ] Phrases include project names, app/tool names, casual messages, code-ish terms, and a trailing `press enter` case.
+- [ ] The repo records the chosen local model and Groq model/profile defaults.
+- [ ] Median and worst-case release-to-insert targets are compared against ADR 0003.
+- [ ] Known accuracy misses are converted into dictionary entries or follow-up TODOs.
+
+#### Implementation notes
+
+- Keep raw benchmark audio/transcripts out of git unless the user explicitly approves fixture samples.
+- This item closes the existing open-ended local STT bakeoff in `Doing`.
+
+### 26. Build a warmed dictation daemon
+
+- Type: AFK
+- Blocked by: 23. Add local and Groq fast profiles; 24. Build a local/Groq benchmark harness
+- User stories covered: Near-instant dictation; input-method UX; service reliability
+
+#### What to build
+
+Replace per-command hot-path startup with a long-running process that keeps config, history, provider setup, and local model/client state warm while preserving the existing CLI commands as control surfaces.
+
+#### Acceptance criteria
+
+- [ ] A daemon subcommand starts a local control loop without stealing focus.
+- [ ] Existing hotkey commands can signal start/stop/cancel to the daemon.
+- [ ] Local STT model/client initialization happens before dictation release where feasible.
+- [ ] Groq request setup avoids repeated config/key discovery on each dictation.
+- [ ] Daemon failures fall back to the current CLI path or report a clear status.
+- [ ] Systemd user service docs are updated for the daemon path.
+
+#### Implementation notes
+
+- Continue Python per ADR 0001 until measured reliability says otherwise.
+- Keep privilege-separated evdev hotkey handling out of the daemon unless there is a clear reason to merge it.
+- Avoid always-listening behavior; recording still starts only from explicit hotkey press.
+
+### 27. Add incremental local STT while recording
+
+- Type: AFK
+- Blocked by: 26. Build a warmed dictation daemon
+- User stories covered: Perceived-instant dictation; local/private dictation; overlay feedback
+
+#### What to build
+
+Let local transcription begin while the hotkey is held, so release only finalizes text, deterministic cleanup, and paste.
+
+#### Acceptance criteria
+
+- [ ] The daemon can stream or chunk microphone audio into a local STT backend.
+- [ ] Interim transcript state is emitted for overlay/status consumers.
+- [ ] Final paste still happens only on release.
+- [ ] The focused app is not live-mutated by interim transcript changes.
+- [ ] Local mode can reach the ADR 0003 release-to-insert target on short utterances during HITL testing.
+
+#### Implementation notes
+
+- Start with `whisper.cpp` streaming or warmed `faster-whisper` chunking, whichever is simpler to verify locally.
+- Prefer correctness of final paste over flashy live typing.
+- Keep command mode separate until normal dictation is stable.
+
+### 28. Add Groq turbo request/response polish
+
+- Type: AFK
+- Blocked by: 23. Add local and Groq fast profiles; 24. Build a local/Groq benchmark harness
+- User stories covered: Turbo dictation; network fallback; provider reliability
+
+#### What to build
+
+Optimize the existing Groq STT path as an explicit turbo profile while keeping it honest as request/response transcription rather than pretending it is local streaming.
+
+#### Acceptance criteria
+
+- [ ] Groq profile records upload/request latency separately from deterministic transform and insertion.
+- [ ] Groq STT failures fall back to copied-only or a clear failed status without losing audio/transcript where available.
+- [ ] Cloud correction is disabled by default for Groq dictation unless explicitly configured.
+- [ ] Groq usage/cost reporting still works after profile naming changes.
+- [ ] Docs state when Groq is expected to beat local and when local should be preferred.
+
+#### Implementation notes
+
+- Keep Groq as the only cloud provider in the near-instant plan.
+- Do not add OpenAI, ElevenLabs, Deepgram, or AssemblyAI adapters as part of this latency track.
