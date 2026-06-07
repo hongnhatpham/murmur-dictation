@@ -27,6 +27,7 @@ class RecordingSession:
     paste: bool = False
     keep_audio: bool = False
     meter_pid: int | None = None
+    target: str | None = None
 
     def to_json(self) -> str:
         return json.dumps({**asdict(self), "audio_path": str(self.audio_path)}, indent=2, sort_keys=True)
@@ -49,6 +50,7 @@ def session_from_dict(data: dict[str, Any]) -> RecordingSession:
         paste=bool(data.get("paste", False)),
         keep_audio=bool(data.get("keep_audio", False)),
         meter_pid=int(data["meter_pid"]) if data.get("meter_pid") else None,
+        target=None if data.get("target") in (None, "") else str(data.get("target")),
     )
 
 
@@ -135,6 +137,7 @@ def start_recording_session(
     state_dir: Path,
     audio_dir: Path,
     recorder: str = "pw-record",
+    target: str | None = None,
     mode: str | None = None,
     paste: bool = False,
     keep_audio: bool = False,
@@ -145,7 +148,10 @@ def start_recording_session(
     state_dir.mkdir(parents=True, exist_ok=True)
     audio_dir.mkdir(parents=True, exist_ok=True)
     audio_path = audio_dir / f"murmur-held-{int(time.time() * 1000)}.wav"
-    cmd = [recorder, "--format=s16", "--rate=16000", "--channels=1", str(audio_path)]
+    cmd = [recorder]
+    if target:
+        cmd.extend(["--target", target])
+    cmd.extend(["--format=s16", "--rate=16000", "--channels=1", str(audio_path)])
     log = (state_dir / "recording-session.log").open("ab")
     try:
         proc = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
@@ -162,7 +168,16 @@ def start_recording_session(
                 meter_log.close()
         except OSError:
             meter_pid = None
-    session = RecordingSession(proc.pid, audio_path, time.time(), mode=mode, paste=paste, keep_audio=keep_audio, meter_pid=meter_pid)
+    session = RecordingSession(
+        proc.pid,
+        audio_path,
+        time.time(),
+        mode=mode,
+        paste=paste,
+        keep_audio=keep_audio,
+        meter_pid=meter_pid,
+        target=target,
+    )
     path = session_path(state_dir)
     path.write_text(session.to_json(), encoding="utf-8")
     path.chmod(0o600)
@@ -201,7 +216,8 @@ def stop_recording_process(session: RecordingSession, *, timeout: float = 5.0, v
 
 # Compatibility wrappers used by simpler callers/tests.
 def start_recording(config):
-    return start_recording_session(state_dir=config.paths.state_dir, audio_dir=config.paths.debug_audio_dir)
+    target = getattr(getattr(config, "recording", None), "target", None)
+    return start_recording_session(state_dir=config.paths.state_dir, audio_dir=config.paths.debug_audio_dir, target=target)
 
 
 def stop_recording(config) -> Path:

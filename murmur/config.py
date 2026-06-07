@@ -59,6 +59,11 @@ class SttConfig:
 
 
 @dataclass(frozen=True)
+class RecordingConfig:
+    target: str | None = None
+
+
+@dataclass(frozen=True)
 class CleanupConfig:
     default_mode: str = "clean"
 
@@ -151,6 +156,7 @@ class PrivacyConfig:
 class MurmurConfig:
     config_path: Path
     paths: PathsConfig = field(default_factory=PathsConfig)
+    recording: RecordingConfig = field(default_factory=RecordingConfig)
     stt: SttConfig = field(default_factory=SttConfig)
     cleanup: CleanupConfig = field(default_factory=CleanupConfig)
     styles: StyleConfig = field(default_factory=StyleConfig)
@@ -187,6 +193,13 @@ def _merge_stt(data: dict[str, Any]) -> SttConfig:
         whisper_cpp_binary=str(data.get("whisper_cpp_binary", defaults.whisper_cpp_binary)),
         whisper_cpp_model=_path(data.get("whisper_cpp_model")),
     )
+
+
+def _merge_recording(data: dict[str, Any]) -> RecordingConfig:
+    defaults = RecordingConfig()
+    raw_target = data.get("target", defaults.target)
+    target = None if raw_target in (None, "") else str(raw_target)
+    return RecordingConfig(target=target)
 
 
 def _merge_cleanup(data: dict[str, Any]) -> CleanupConfig:
@@ -269,6 +282,7 @@ def load_config(path: str | Path | None = None) -> MurmurConfig:
     return MurmurConfig(
         config_path=cfg_path,
         paths=_merge_paths(raw.get("paths", {})),
+        recording=_merge_recording(raw.get("recording", {})),
         stt=_merge_stt(raw.get("stt", {})),
         cleanup=_merge_cleanup(raw.get("cleanup", {})),
         styles=_merge_styles(raw.get("styles", {})),
@@ -299,6 +313,12 @@ def sample_config() -> str:
 # personal_db = "{defaults.paths.personal_path}"
 # model_dir = "{defaults.paths.model_dir}"
 # debug_audio_dir = "{defaults.paths.debug_audio_dir}"
+
+[recording]
+# Optional PipeWire target for capture. Use this when the desktop default source
+# is a muted onboard input or the wrong microphone.
+# Find source names with: pactl list sources short
+# target = "alsa_input.usb-Focusrite_Scarlett_2i2_USB_...HiFi__Mic1__source"
 
 [stt]
 # Near-instant profiles target only local STT and Groq:

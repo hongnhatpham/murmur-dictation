@@ -7,7 +7,7 @@ from pathlib import Path
 from .errors import MurmurError
 
 
-def record_audio(output: Path, duration: float, recorder: str = "pw-record") -> None:
+def record_audio(output: Path, duration: float, recorder: str = "pw-record", target: str | None = None) -> None:
     """Record default microphone audio to a mono 16kHz WAV file."""
     if duration <= 0:
         raise MurmurError("Recording duration must be greater than zero.", "Pass --duration SECONDS, for example --duration 5.")
@@ -23,11 +23,17 @@ def record_audio(output: Path, duration: float, recorder: str = "pw-record") -> 
         "--signal=INT",
         str(duration),
         recorder,
-        "--format=s16",
-        "--rate=16000",
-        "--channels=1",
-        str(output),
     ]
+    if target:
+        cmd.extend(["--target", target])
+    cmd.extend(
+        [
+            "--format=s16",
+            "--rate=16000",
+            "--channels=1",
+            str(output),
+        ]
+    )
     result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     if result.returncode not in (0, 124):
         raise MurmurError(

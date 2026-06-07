@@ -44,6 +44,7 @@ Default state paths:
 
 Default behavior:
 
+- recording source: PipeWire default source, unless `[recording].target` is set
 - STT provider: `faster-whisper`
 - STT model: `base.en`
 - language: `auto`
@@ -60,6 +61,31 @@ Generate a documented config with:
 python -m murmur init
 python -m murmur init --overwrite
 ```
+
+## Recording source
+
+Murmur records from PipeWire's default source unless a target is configured. If
+the default source is a muted onboard microphone, capture can produce a valid
+non-empty WAV of digital silence and STT may hallucinate text. `murmur doctor`
+warns when the default source reports muted.
+
+Inspect sources:
+
+```sh
+pactl get-default-source
+wpctl get-volume @DEFAULT_AUDIO_SOURCE@
+pactl list sources short
+```
+
+Pin Murmur to a known microphone without changing the desktop-wide default:
+
+```toml
+[recording]
+target = "alsa_input.usb-Focusrite_Scarlett_2i2_USB_Y87GQFB9923514-00.HiFi__Mic1__source"
+```
+
+Both `murmur dictate` and the `start-recording`/`stop-recording` hotkey path use
+this target.
 
 ## Near-instant provider profiles
 

@@ -659,7 +659,7 @@ def cmd_dictate(args: argparse.Namespace) -> int:
         notify("Recording")
         write_status(cfg.paths.state_dir, "recording", "Recording", ttl_seconds=30)
         rec_start = time.perf_counter()
-        record_audio(audio_path, args.duration)
+        record_audio(audio_path, args.duration, target=cfg.recording.target)
         duration_ms = int((time.perf_counter() - rec_start) * 1000)
         rc = _process_audio(cfg=cfg, audio_path=audio_path, mode=mode, paste=args.paste, duration_ms=duration_ms, start=time.perf_counter())
         if rc == 0:
@@ -684,6 +684,7 @@ def cmd_start_recording(args: argparse.Namespace) -> int:
         session = start_recording_session(
             state_dir=cfg.paths.state_dir,
             audio_dir=cfg.paths.debug_audio_dir,
+            target=cfg.recording.target,
             mode=args.mode,
             paste=args.paste,
             keep_audio=args.keep_audio,
@@ -892,7 +893,7 @@ def cmd_command(args: argparse.Namespace) -> int:
                 audio_path = cfg.paths.debug_audio_dir / f"murmur-command-{int(time.time() * 1000)}.wav"
                 notify("Recording command")
                 write_status(cfg.paths.state_dir, "command", "Recording command", ttl_seconds=30)
-                record_audio(audio_path, args.duration)
+                record_audio(audio_path, args.duration, target=cfg.recording.target)
             notify("Processing command")
             write_status(cfg.paths.state_dir, "processing", "Command", ttl_seconds=30)
             personal = PersonalStore(cfg.paths.personal_path)

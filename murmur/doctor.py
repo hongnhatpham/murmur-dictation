@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import re
 import shutil
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -24,6 +26,8 @@ def run_checks(config: MurmurConfig) -> list[Check]:
 
     checks.append(Check("config", True, str(paths.config_file())))
     checks.append(_tool("pw-record", "PipeWire audio recorder"))
+    checks.append(_tool("timeout", "fixed-duration recorder stop helper"))
+    checks.extend(_recording_source_checks(config))
     checks.append(_tool(config.insertion.clipboard_tool, "Wayland clipboard"))
 
     paste_tools = [config.insertion.paste_tool]
@@ -81,6 +85,82 @@ def run_checks(config: MurmurConfig) -> list[Check]:
 def _tool(name: str, purpose: str, required: bool = True) -> Check:
     found = shutil.which(name)
     return Check(name, found is not None, f"{purpose}: {found or 'missing'}", required=required)
+
+
+def _run_text(cmd: list[str]) -> str | None:
+    try:
+        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=3)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip()
+
+
+def _pactl_sources() -> dict[str, str]:
+    output = _run_text(["pactl", "list", "sources", "short"])
+    if not output:
+        return {}
+    sources: dict[str, str] = {}
+    for line in output.splitlines():
+        parts = line.split()
+        if len(parts) >= 2:
+            sources[parts[0]] = parts[1]
+            sources[parts[1]] = parts[1]
+    return sources
+
+
+def _wpctl_source_ids() -> set[str]:
+    output = _run_text(["wpctl", "status"])
+    if not output:
+        return set()
+    source_ids: set[str] = set()
+    in_sources = False
+    for line in output.splitlines():
+        if "Sources:" in line:
+            in_sources = True
+            continue
+        if in_sources and any(section in line for section in ("Filters:", "Streams:", "Video", "Settings")):
+            break
+        if not in_sources:
+            continue
+        match = re.search(r"(?:\*|\s)\s*(\d+)\.", line)
+        if match:
+            source_ids.add(match.group(1))
+    return source_ids
+
+
+def _recording_source_checks(config: MurmurConfig) -> list[Check]:
+    target = config.recording.target
+    if target:
+        sources = _pactl_sources()
+        source_ids = _wpctl_source_ids() if target.isdigit() else set()
+        if not sources and not source_ids:
+            return [Check("recording target", True, f"{target}; pactl unavailable, not validated", required=False)]
+        if target in sources or target in source_ids:
+            return [Check("recording target", True, target)]
+        return [
+            Check(
+                "recording target",
+                False,
+                f"{target} was not found in `pactl list sources short` or `wpctl status` sources",
+                required=True,
+            )
+        ]
+
+    default_source = _run_text(["pactl", "get-default-source"]) or "default PipeWire source"
+    default_volume = _run_text(["wpctl", "get-volume", "@DEFAULT_AUDIO_SOURCE@"])
+    if default_volume and "[MUTED]" in default_volume:
+        return [
+            Check(
+                "default source",
+                False,
+                f"{default_source} is muted; set [recording].target or unmute/change the default source",
+                required=False,
+            )
+        ]
+    detail = default_source if not default_volume else f"{default_source}; {default_volume}"
+    return [Check("default source", True, detail, required=False)]
 
 
 def has_required_failures(checks: list[Check]) -> bool:

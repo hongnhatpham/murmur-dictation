@@ -51,6 +51,11 @@ murmur cancel-recording
 
 `start-recording` launches `pw-record`, writes a guarded session file under the state directory, and refuses overlapping recordings. `stop-recording` stops the recorder and runs `record -> transcribe -> transform -> copy -> insert -> history`; if paste simulation is unavailable, it leaves the text on the Wayland clipboard and notifies `copied`. `cancel-recording` stops recording and deletes the captured audio without insertion.
 
+If the desktop default input is not the intended microphone, set `[recording].target`
+in `~/.config/murmur/config.toml`. The one-shot command and this command pair
+both pass that target to `pw-record`; the evdev hotkey service does not need its
+own source setting.
+
 niri's basic `binds` are press-triggered rather than release-triggered, so the one-shot `murmur dictate --paste` binding remains the recommended niri-only MVP path unless you add a release-aware binding helper.
 
 ## Start hold-to-talk on boot

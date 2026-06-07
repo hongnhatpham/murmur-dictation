@@ -4,9 +4,11 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from murmur.errors import MurmurError
-from murmur.session import RecordingSession, assert_no_active_session, read_session, session_from_dict, session_path
+from murmur.session import RecordingSession, assert_no_active_session, read_session, session_path, session_from_dict, start_recording_session
 
 
 class SessionTests(unittest.TestCase):
@@ -60,6 +62,26 @@ class SessionTests(unittest.TestCase):
 
             with self.assertRaisesRegex(MurmurError, "session file is corrupt"):
                 assert_no_active_session(path)
+
+    def test_start_recording_session_passes_target_to_recorder(self):
+        with tempfile.TemporaryDirectory() as tmpdir_s:
+            tmp_path = Path(tmpdir_s)
+            missing_meter = tmp_path / "missing-meter"
+            with patch("murmur.session.shutil.which", return_value="/usr/bin/pw-record"), patch(
+                "murmur.session.METER_SCRIPT", missing_meter
+            ), patch("murmur.session.subprocess.Popen", return_value=SimpleNamespace(pid=123)) as popen:
+                session = start_recording_session(
+                    state_dir=tmp_path / "state",
+                    audio_dir=tmp_path / "audio",
+                    target="alsa_input.test",
+                    paste=True,
+                )
+
+        cmd = popen.call_args.args[0]
+        self.assertIn("--target", cmd)
+        self.assertEqual(cmd[cmd.index("--target") + 1], "alsa_input.test")
+        self.assertEqual(session.target, "alsa_input.test")
+        self.assertTrue(session.paste)
 
 
 if __name__ == "__main__":
