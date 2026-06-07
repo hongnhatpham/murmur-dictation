@@ -21,6 +21,10 @@ from .correction import correct_text, warm_correction_model
 from .doctor import format_checks, has_required_failures, run_checks
 from .errors import MurmurError
 from .history import HistoryStore, format_entries, format_latency_metrics
+from .incremental import (
+    await_incremental_prefill_for_session,
+    clear_incremental_transcript,
+)
 from .insertion import InsertionError, copy_selection_to_clipboard, copy_to_clipboard, insert_text, read_clipboard
 from .notify import notify
 from .personal import PersonalStore, format_snippets, format_terms, format_vocabulary_misses, likely_vocabulary_misses
@@ -36,7 +40,7 @@ from .session import (
 )
 from .service import request_stop_recording, run_service
 from .status import write_status
-from .stt import SttError, transcribe
+from .stt import SttError, Transcription, transcribe
 from .transform import transform_transcript
 
 
@@ -474,6 +478,7 @@ def _process_audio(
     duration_ms: int | None = None,
     start: float | None = None,
     recorder_stop_latency_ms: int | None = None,
+    prefill_transcription: Transcription | None = None,
 ) -> int:
     store = HistoryStore(cfg.paths.history_path)
     transcript_text = ""
@@ -505,8 +510,12 @@ def _process_audio(
         snippets = personal.snippet_map()
         stage = "stt"
         stage_start = time.perf_counter()
-        tx = transcribe(audio_path, cfg.stt, dictionary_terms=terms)
-        stt_latency_ms = _elapsed_ms(stage_start)
+        if prefill_transcription is not None:
+            tx = prefill_transcription
+            stt_latency_ms = 0
+        else:
+            tx = transcribe(audio_path, cfg.stt, dictionary_terms=terms)
+            stt_latency_ms = _elapsed_ms(stage_start)
         provider = tx.provider
         transcript_text = tx.text
         stage = "transform"
@@ -746,12 +755,12 @@ def _cmd_stop_recording_direct(args: argparse.Namespace, cfg=None) -> int:
             stop_start = time.perf_counter()
             stop_recording_process(session)
             recorder_stop_latency_ms = _elapsed_ms(stop_start)
-            clear_session(cfg.paths.state_dir)
         except MurmurError as exc:
             debug_log(f"stop-recording failed before processing: {exc.doctor()}")
             if str(exc) in {"No recording in progress.", "Recording process is not running."}:
                 # Release hotkeys can fire more than once after a successful stop.
                 # Treat stale/no-session stops as no-ops to avoid false failure notifications.
+                clear_incremental_transcript(cfg.paths.state_dir)
                 return 0
             notify("Failed", str(exc))
             print(f"murmur: {exc.doctor()}", file=sys.stderr)
@@ -761,6 +770,12 @@ def _cmd_stop_recording_direct(args: argparse.Namespace, cfg=None) -> int:
         paste = False if args.no_paste else (args.paste or session.paste)
         duration_ms = int((time.time() - session.started_at) * 1000)
         keep_audio = args.keep_audio or session.keep_audio or cfg.privacy.keep_debug_audio
+        try:
+            prefill = await_incremental_prefill_for_session(cfg, session, duration_ms=duration_ms)
+        finally:
+            clear_session(cfg.paths.state_dir)
+        if prefill is not None:
+            debug_log(f"using incremental local STT prefill provider={prefill.provider} audio={session.audio_path}")
         rc = _process_audio(
             cfg=cfg,
             audio_path=session.audio_path,
@@ -769,7 +784,9 @@ def _cmd_stop_recording_direct(args: argparse.Namespace, cfg=None) -> int:
             duration_ms=duration_ms,
             start=release_start,
             recorder_stop_latency_ms=recorder_stop_latency_ms,
+            prefill_transcription=prefill,
         )
+        clear_incremental_transcript(cfg.paths.state_dir)
         if rc == 0:
             _cleanup_processed_audio(cfg, session.audio_path, keep_audio=keep_audio)
         return rc
@@ -811,6 +828,7 @@ def cmd_cancel_recording(_args: argparse.Namespace) -> int:
         session = load_active_session(cfg.paths.state_dir)
         stop_recording_process(session, validate_audio=False)
         clear_session(cfg.paths.state_dir)
+        clear_incremental_transcript(cfg.paths.state_dir)
         session.audio_path.unlink(missing_ok=True)
     except MurmurError as exc:
         debug_log(f"cancel-recording failed: {exc.doctor()}")

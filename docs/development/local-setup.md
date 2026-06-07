@@ -105,7 +105,11 @@ python -m murmur provider-profile local
 python -m murmur provider-profile groq
 ```
 
-`python -m murmur provider-profile cloud` remains as a compatibility alias for `groq`; it does not mean broad cloud-provider support. Run `python -m murmur doctor` after switching. Doctor reports whether the selected local package/model or Groq key is available without printing API key values.
+`python -m murmur provider-profile cloud` remains as a compatibility alias for `groq`; it does not mean broad cloud-provider support. Run `python -m murmur doctor` after switching. Doctor reports whether the selected local package/model or Groq key is available without printing API key values. Restart `murmur.service` after changing profiles so the warmed process loads the new STT provider:
+
+```sh
+systemctl --user restart murmur.service
+```
 
 ## Warmed background processor
 
@@ -115,7 +119,21 @@ Run the warmed processor when using hold-to-talk daily:
 python -m murmur service
 ```
 
-The service listens on a private Unix socket under the state directory. `murmur stop-recording` automatically delegates stop/process/insert work to that socket when it is available, then falls back to the direct CLI path when it is not. This keeps Python config/store setup and cached STT backends alive between dictations. For local `faster-whisper`, the model can stay loaded in the service process instead of being rebuilt after every hotkey release.
+The service listens on a private Unix socket under the state directory. `murmur stop-recording` automatically delegates release-time work to that socket when it is available, then falls back to the direct CLI path when it is not. `murmur start-recording` remains direct so recording begins immediately even if the service is busy. This keeps Python config/store setup and cached STT backends alive between dictations. For local `faster-whisper`, the model can stay loaded in the service process instead of being rebuilt after every hotkey release.
+
+When the active STT provider is local and history is enabled, the service monitors active recordings and launches an experimental incremental recognizer while the hotkey is held. It periodically repairs the still-open `pw-record` WAV into a valid temporary snapshot, transcribes that snapshot locally, and stores the latest partial transcript. On release, `stop-recording` waits briefly for an in-flight same-session snapshot, then uses the partial transcript only when it matches the active recording and any untranscribed tail is short and probably silent; otherwise it falls back to the normal final transcription. This means the feature can reduce release-to-insert latency when the final partial is current or the user paused before release, without silently dropping late words.
+
+Runtime controls:
+
+```sh
+MURMUR_INCREMENTAL_LOCAL_STT=0      # disable incremental local STT
+MURMUR_INCREMENTAL_INTERVAL_SECONDS=0.5
+MURMUR_INCREMENTAL_MIN_AUDIO_MS=500
+MURMUR_INCREMENTAL_PREFILL_WAIT_MS=1500
+MURMUR_INCREMENTAL_MAX_TAIL_MS=1500
+MURMUR_INCREMENTAL_MAX_AGE_SECONDS=3.0
+MURMUR_INCREMENTAL_TAIL_SILENCE_RMS=500
+```
 
 Disable delegation for one command when debugging:
 

@@ -7,11 +7,14 @@ import json
 import os
 import signal
 import socket
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
 from .config import MurmurConfig
+from .incremental import clear_incremental_transcript, start_incremental_transcription
+from .session import process_alive, read_session, session_path
 from .stt import warm_stt_backend
 
 SOCKET_FILENAME = "murmur.sock"
@@ -33,21 +36,27 @@ def socket_path(state_dir: Path) -> Path:
 
 
 def request_stop_recording(cfg: MurmurConfig, args: argparse.Namespace) -> ServiceResponse | None:
+    return _request_service(
+        cfg,
+        {
+            "version": PROTOCOL_VERSION,
+            "command": "stop-recording",
+            "args": {
+                "mode": args.mode,
+                "paste": bool(args.paste),
+                "no_paste": bool(args.no_paste),
+                "keep_audio": bool(args.keep_audio),
+            },
+        },
+    )
+
+
+def _request_service(cfg: MurmurConfig, payload: dict[str, object]) -> ServiceResponse | None:
     if os.environ.get("MURMUR_SERVICE_BYPASS") or os.environ.get("MURMUR_DISABLE_SERVICE"):
         return None
     path = socket_path(cfg.paths.state_dir)
     if not path.exists():
         return None
-    payload = {
-        "version": PROTOCOL_VERSION,
-        "command": "stop-recording",
-        "args": {
-            "mode": args.mode,
-            "paste": bool(args.paste),
-            "no_paste": bool(args.no_paste),
-            "keep_audio": bool(args.keep_audio),
-        },
-    }
     sent = False
     try:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
@@ -77,6 +86,7 @@ def run_service(cfg: MurmurConfig, *, stop_recording_func: StopRecordingFunc) ->
     cfg.paths.state_dir.mkdir(parents=True, exist_ok=True)
     path = socket_path(cfg.paths.state_dir)
     _remove_stale_socket(path)
+    clear_incremental_transcript(cfg.paths.state_dir)
     try:
         warmed = warm_stt_backend(cfg.stt)
         warm_status = f"stt={warmed}"
@@ -90,24 +100,32 @@ def run_service(cfg: MurmurConfig, *, stop_recording_func: StopRecordingFunc) ->
         raise KeyboardInterrupt
 
     previous_sigterm = signal.signal(signal.SIGTERM, request_shutdown)
-    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:
-        server.bind(str(path))
-        os.chmod(path, 0o600)
-        server.listen(1)
-        print(f"murmur service ready socket={path} {warm_status}", flush=True)
-        try:
+    monitor_stop = threading.Event()
+    monitor = threading.Thread(target=_recording_monitor, args=(cfg, monitor_stop), name="murmur-recording-monitor", daemon=True)
+    monitor.start()
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:
+            server.bind(str(path))
+            os.chmod(path, 0o600)
+            server.listen(1)
+            print(f"murmur service ready socket={path} {warm_status}", flush=True)
             while not stop:
                 conn, _addr = server.accept()
                 with conn:
                     _handle_connection(conn, stop_recording_func)
-        except KeyboardInterrupt:
-            return 0
-        finally:
-            signal.signal(signal.SIGTERM, previous_sigterm)
-            path.unlink(missing_ok=True)
+    except KeyboardInterrupt:
+        return 0
+    finally:
+        monitor_stop.set()
+        clear_incremental_transcript(cfg.paths.state_dir)
+        signal.signal(signal.SIGTERM, previous_sigterm)
+        path.unlink(missing_ok=True)
 
 
-def handle_request(payload: dict[str, object], stop_recording_func: StopRecordingFunc) -> ServiceResponse:
+def handle_request(
+    payload: dict[str, object],
+    stop_recording_func: StopRecordingFunc,
+) -> ServiceResponse:
     if payload.get("version") != PROTOCOL_VERSION:
         return ServiceResponse(1, stderr="murmur: unsupported service protocol\n")
     command = payload.get("command")
@@ -179,3 +197,16 @@ def _remove_stale_socket(path: Path) -> None:
         path.unlink(missing_ok=True)
         return
     raise RuntimeError(f"Murmur service already running at {path}")
+
+
+def _recording_monitor(cfg: MurmurConfig, stop: threading.Event) -> None:
+    while not stop.is_set():
+        try:
+            path = session_path(cfg.paths.state_dir)
+            if path.exists():
+                session = read_session(path)
+                if process_alive(session.pid):
+                    start_incremental_transcription(cfg, session)
+        except Exception:
+            pass
+        stop.wait(0.25)

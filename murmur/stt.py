@@ -314,6 +314,10 @@ def _backend_cache_key(config: SttConfig) -> tuple[object, ...]:
 
 
 def _cacheable_backend(provider: str) -> bool:
+    return is_local_stt_provider(provider)
+
+
+def is_local_stt_provider(provider: str) -> bool:
     return provider in ("faster-whisper", "faster_whisper", "whisper-cpp", "whisper.cpp", "whispercpp")
 
 

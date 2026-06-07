@@ -15,7 +15,7 @@ murmur start-recording --paste
 murmur stop-recording
 ```
 
-`start-recording` launches a tracked `pw-record` subprocess and writes a local session file under `~/.local/state/murmur/recording-session.json`. `stop-recording` interrupts that recorder, clears the session file, then runs the normal transcribe/transform/copy-or-paste pipeline. Use `murmur cancel-recording` for a cancel binding; it stops the recorder and deletes captured audio without insertion.
+`start-recording` launches a tracked `pw-record` subprocess and writes a local session file under `~/.local/state/murmur/recording-session.json`. `stop-recording` interrupts that recorder, clears the session file, then runs the normal transcribe/transform/copy-or-paste pipeline. If the warmed `murmur service` socket is available, release-time processing happens inside that service. In the local STT profile, the service can transcribe partial snapshots while recording and use a fresh partial on release when any untranscribed tail is short and silent. Use `murmur cancel-recording` for a cancel binding; it stops the recorder and deletes captured audio without insertion.
 
 ## Suggested early binding
 

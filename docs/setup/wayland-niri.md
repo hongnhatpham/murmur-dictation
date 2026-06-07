@@ -49,7 +49,7 @@ murmur stop-recording
 murmur cancel-recording
 ```
 
-`start-recording` launches `pw-record`, writes a guarded session file under the state directory, and refuses overlapping recordings. `stop-recording` stops the recorder and runs `record -> transcribe -> transform -> copy -> insert -> history`; if the warmed `murmur service` socket is available, the release-time processing happens inside that service, otherwise the CLI runs it directly. If paste simulation is unavailable, Murmur leaves the text on the Wayland clipboard and notifies `copied`. `cancel-recording` stops recording and deletes the captured audio without insertion.
+`start-recording` launches `pw-record`, writes a guarded session file under the state directory, and refuses overlapping recordings. `stop-recording` stops the recorder and runs `record -> transcribe -> transform -> copy -> insert -> history`; if the warmed `murmur service` socket is available, release-time processing happens inside that service, otherwise the CLI runs it directly. In the local STT profile, the service monitors active recordings, transcribes partial snapshots while the hotkey is held, and uses a fresh partial transcript on release only when any untranscribed tail is short and silent. If paste simulation is unavailable, Murmur leaves the text on the Wayland clipboard and notifies `copied`. `cancel-recording` stops recording and deletes the captured audio without insertion.
 
 The one-shot command and this command pair use the desktop-selected default
 input unless `[recording].target` is configured. Set that target only for an
@@ -94,7 +94,7 @@ The helper falls back to stderr when `notify-send` is unavailable. The current C
 
 ## Warmed service install
 
-Install the user service so local STT backends and service-side setup stay warm between hotkey releases:
+Install the user service so local STT backends, incremental snapshots, and service-side setup stay warm between hotkey releases:
 
 ```sh
 # from the repo checkout

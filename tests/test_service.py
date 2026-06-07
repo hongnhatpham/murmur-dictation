@@ -6,9 +6,10 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from murmur.config import load_config
-from murmur.service import _handle_connection, handle_request, request_stop_recording
+from murmur.service import _handle_connection, _recording_monitor, handle_request, request_stop_recording
 
 
 class ServiceTests(unittest.TestCase):
@@ -82,6 +83,35 @@ class ServiceTests(unittest.TestCase):
             server.close()
 
         self.assertFalse(called)
+
+    def test_recording_monitor_starts_incremental_worker_for_active_session(self):
+        with tempfile.TemporaryDirectory() as tmpdir_s:
+            tmpdir = Path(tmpdir_s)
+            config_path = tmpdir / "config.toml"
+            config_path.write_text(f'[paths]\nstate_dir = "{tmpdir / "state"}"\n', encoding="utf-8")
+            cfg = load_config(config_path)
+            cfg.paths.state_dir.mkdir(parents=True)
+            session_path = cfg.paths.state_dir / "recording-session.json"
+            session_path.write_text(
+                '{"pid":123,"audio_path":"' + str(tmpdir / "held.wav") + '","started_at":1}',
+                encoding="utf-8",
+            )
+            import threading
+
+            stop_event = threading.Event()
+            started = []
+
+            def stop_after_start(_cfg, session):
+                started.append(session.audio_path)
+                stop_event.set()
+                return True
+
+            with patch("murmur.service.process_alive", return_value=True), patch(
+                "murmur.service.start_incremental_transcription", side_effect=stop_after_start
+            ):
+                _recording_monitor(cfg, stop_event)
+
+        self.assertEqual(started, [tmpdir / "held.wav"])
 
 
 if __name__ == "__main__":

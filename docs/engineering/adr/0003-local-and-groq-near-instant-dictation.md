@@ -49,3 +49,9 @@ Do not pursue OpenAI, ElevenLabs, Deepgram, AssemblyAI, or another cloud STT pro
 - AI correction moves out of the default hot path for latency-sensitive dictation.
 - The daemon/streaming work becomes more important than model choice alone.
 - Benchmarks must compare local and Groq on the same real phrases before changing defaults.
+
+## Implementation note: 2026-06-07
+
+The Python service now includes an experimental local-only incremental path. While `murmur service` is running, it monitors active recordings and local STT providers can transcribe repaired snapshots of the still-open `pw-record` WAV while the hotkey is held. On release, Murmur waits briefly for an in-flight same-session snapshot, then uses the latest partial transcript only if it matches the active recording and any untranscribed tail is short and probably silent; otherwise it falls back to the normal final STT pass.
+
+This is an interim snapshot recognizer, not live mutation of the focused app. It keeps the ADR boundary intact: final insertion still happens once, on release.
