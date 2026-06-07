@@ -16,6 +16,7 @@ python -m murmur last-transcript
 python -m murmur start-recording --paste
 python -m murmur stop-recording
 python -m murmur cancel-recording
+python -m murmur service
 ```
 
 After editable install, the same commands are available as `murmur ...`:
@@ -105,6 +106,32 @@ python -m murmur provider-profile groq
 ```
 
 `python -m murmur provider-profile cloud` remains as a compatibility alias for `groq`; it does not mean broad cloud-provider support. Run `python -m murmur doctor` after switching. Doctor reports whether the selected local package/model or Groq key is available without printing API key values.
+
+## Warmed background processor
+
+Run the warmed processor when using hold-to-talk daily:
+
+```sh
+python -m murmur service
+```
+
+The service listens on a private Unix socket under the state directory. `murmur stop-recording` automatically delegates stop/process/insert work to that socket when it is available, then falls back to the direct CLI path when it is not. This keeps Python config/store setup and cached STT backends alive between dictations. For local `faster-whisper`, the model can stay loaded in the service process instead of being rebuilt after every hotkey release.
+
+Disable delegation for one command when debugging:
+
+```sh
+MURMUR_SERVICE_BYPASS=1 python -m murmur stop-recording
+```
+
+Install the systemd user service from the repo:
+
+```sh
+packaging/systemd/install-user-service.sh "$(pwd)/.venv/bin/murmur"
+systemctl --user daemon-reload
+systemctl --user import-environment WAYLAND_DISPLAY XDG_CURRENT_DESKTOP DBUS_SESSION_BUS_ADDRESS PATH
+systemctl --user enable --now murmur.service
+journalctl --user -u murmur.service -f
+```
 
 ## Local/Groq benchmark harness
 

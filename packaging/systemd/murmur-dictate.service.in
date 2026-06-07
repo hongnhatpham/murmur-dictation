@@ -8,7 +8,7 @@ Wants=pipewire.service wireplumber.service
 Type=oneshot
 WorkingDirectory=@PROJECT_DIR@
 EnvironmentFile=-%h/.config/murmur/env
-ExecStart=@MURMUR_BIN@ dictate --paste
+ExecStart="@MURMUR_BIN@" dictate --paste
 
 # The command needs the user's Wayland/session environment. If started from a
 # hotkey it normally inherits that; if started via systemctl, run:

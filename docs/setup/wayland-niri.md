@@ -49,7 +49,7 @@ murmur stop-recording
 murmur cancel-recording
 ```
 
-`start-recording` launches `pw-record`, writes a guarded session file under the state directory, and refuses overlapping recordings. `stop-recording` stops the recorder and runs `record -> transcribe -> transform -> copy -> insert -> history`; if paste simulation is unavailable, it leaves the text on the Wayland clipboard and notifies `copied`. `cancel-recording` stops recording and deletes the captured audio without insertion.
+`start-recording` launches `pw-record`, writes a guarded session file under the state directory, and refuses overlapping recordings. `stop-recording` stops the recorder and runs `record -> transcribe -> transform -> copy -> insert -> history`; if the warmed `murmur service` socket is available, the release-time processing happens inside that service, otherwise the CLI runs it directly. If paste simulation is unavailable, Murmur leaves the text on the Wayland clipboard and notifies `copied`. `cancel-recording` stops recording and deletes the captured audio without insertion.
 
 The one-shot command and this command pair use the desktop-selected default
 input unless `[recording].target` is configured. Set that target only for an
@@ -92,9 +92,9 @@ scripts/murmur-notify failed "Transcription failed; see history/logs."
 
 The helper falls back to stderr when `notify-send` is unavailable. The current CLI calls `notify-send` through `murmur.notify`; shell scripts can use this helper for the same terse states. Avoid secrets or transcript content in error notifications.
 
-## Service install
+## Warmed service install
 
-The service template is intentionally override-friendly while the daemon command is still settling.
+Install the user service so local STT backends and service-side setup stay warm between hotkey releases:
 
 ```sh
 # from the repo checkout
@@ -105,11 +105,17 @@ pip install -e '.[stt]'
 packaging/systemd/install-user-service.sh "$(pwd)/.venv/bin/murmur"
 systemctl --user daemon-reload
 systemctl --user import-environment WAYLAND_DISPLAY XDG_CURRENT_DESKTOP DBUS_SESSION_BUS_ADDRESS PATH
-systemctl --user start murmur-dictate.service
-journalctl --user -u murmur-dictate.service -f
+systemctl --user enable --now murmur.service
+journalctl --user -u murmur.service -f
 ```
 
-The installer also writes `~/.config/systemd/user/murmur.service` as a future long-running daemon template. Do not enable it until the CLI exposes a service/daemon subcommand. If the daemon subcommand changes, edit the installed service:
+`murmur stop-recording` automatically uses the service when `~/.local/state/murmur/murmur.sock` is reachable. To force the direct one-shot path for a debugging run:
+
+```sh
+MURMUR_SERVICE_BYPASS=1 murmur stop-recording
+```
+
+The installer also writes `~/.config/systemd/user/murmur-dictate.service` for one-shot fixed-duration testing. If the service command changes, edit the installed service:
 
 ```sh
 systemctl --user edit --full murmur.service
@@ -127,7 +133,7 @@ systemctl --user daemon-reload
 
 ## Logs and constraints
 
-- One-shot service logs: `journalctl --user -u murmur-dictate.service -f`; daemon logs later: `journalctl --user -u murmur.service -f`.
+- One-shot service logs: `journalctl --user -u murmur-dictate.service -f`; warmed service logs: `journalctl --user -u murmur.service -f`.
 - Runtime config/env: `~/.config/murmur/`.
 - Local history/cache should remain under XDG state/cache paths: `~/.local/state/murmur` and `~/.cache/murmur` by default.
 - Do not commit model files, audio recordings, API keys, personal env files, or history databases.

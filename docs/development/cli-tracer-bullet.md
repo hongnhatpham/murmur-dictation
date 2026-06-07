@@ -11,7 +11,7 @@ murmur dictate --duration 5
 
 Pipeline: `pw-record` → free/local STT → light cleanup/action parsing → `wl-copy` → optional paste simulation → SQLite history.
 
-Murmur records release-to-insert latency plus stage spans for STT, deterministic transform, correction, clipboard copy, paste, and residual overhead where available. Use `murmur metrics --limit 20` for transcript-free latency review.
+Murmur records release-to-insert latency plus stage spans for STT, deterministic transform, correction, clipboard copy, paste, and residual overhead where available. Use `murmur metrics --limit 20` for transcript-free latency review. For daily hold-to-talk use, run `murmur service` so `stop-recording` can delegate processing to a warm background process with cached STT backends.
 
 ## Required local tools
 
@@ -72,7 +72,7 @@ murmur stop-recording            # key release; processes and inserts
 murmur cancel-recording          # optional cancel binding
 ```
 
-Only one session can be active at a time. Murmur uses a non-blocking lock file plus `~/.local/state/murmur/recording-session.json` to prevent overlapping recording/processing runs. If a command crashes, check that no `pw-record` or `murmur stop-recording` process is active before deleting a stale session or lock file.
+Only one session can be active at a time. Murmur uses a non-blocking lock file plus `~/.local/state/murmur/recording-session.json` to prevent overlapping recording/processing runs. If `murmur service` is running, `stop-recording` sends the release-time work to the service over `~/.local/state/murmur/murmur.sock`; if the socket is missing it runs the same path directly. If a command crashes, check that no `pw-record`, `murmur service`, or `murmur stop-recording` process is active before deleting a stale session or lock file.
 
 ## Copy vs paste
 

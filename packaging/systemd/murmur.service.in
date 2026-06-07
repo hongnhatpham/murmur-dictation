@@ -8,9 +8,9 @@ Wants=pipewire.service wireplumber.service
 Type=simple
 WorkingDirectory=@PROJECT_DIR@
 EnvironmentFile=-%h/.config/murmur/env
-# Keep the command narrow and override-friendly while the CLI is still a prototype.
-# Expected long-running CLI shape: `murmur service` or `murmur daemon`.
-ExecStart=@MURMUR_BIN@ service
+Environment=HF_HOME=%h/.cache/murmur/huggingface
+Environment=HUGGINGFACE_HUB_CACHE=%h/.cache/murmur/huggingface/hub
+ExecStart="@MURMUR_BIN@" service
 Restart=on-failure
 RestartSec=2s
 

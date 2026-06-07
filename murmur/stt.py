@@ -31,6 +31,9 @@ class SttBackend(Protocol):
     def transcribe(self, audio_path: Path, dictionary_terms: Iterable[str] | None = None) -> str: ...
 
 
+_BACKEND_CACHE: dict[tuple[object, ...], SttBackend] = {}
+
+
 def build_backend(provider: str) -> SttBackend:
     provider = provider.lower()
     if provider == "auto":
@@ -57,8 +60,14 @@ class FasterWhisperBackend:
         self.device = os.environ.get("MURMUR_WHISPER_DEVICE", "cpu")
         self.compute_type = os.environ.get("MURMUR_WHISPER_COMPUTE_TYPE", "int8")
         self.initial_prompt: str | None = None
+        self._model = None
 
-    def transcribe(self, audio_path: Path, dictionary_terms: Iterable[str] | None = None) -> str:
+    def warm(self) -> None:
+        self._load_model()
+
+    def _load_model(self):
+        if self._model is not None:
+            return self._model
         try:
             from faster_whisper import WhisperModel  # type: ignore
         except ImportError as exc:
@@ -66,15 +75,20 @@ class FasterWhisperBackend:
                 "Missing Python STT dependency: faster-whisper",
                 "Install it in your environment with `python -m pip install faster-whisper`, or configure whisper.cpp with MURMUR_WHISPER_CPP and MURMUR_WHISPER_CPP_MODEL.",
             ) from exc
+        self._model = WhisperModel(self.model_name, device=self.device, compute_type=self.compute_type)
+        return self._model
 
+    def transcribe(self, audio_path: Path, dictionary_terms: Iterable[str] | None = None) -> str:
         try:
-            model = WhisperModel(self.model_name, device=self.device, compute_type=self.compute_type)
+            model = self._load_model()
             initial_prompt = self.initial_prompt or _dictionary_prompt(dictionary_terms)
             kwargs = {"beam_size": 1}
             if initial_prompt:
                 kwargs["initial_prompt"] = initial_prompt
             segments, _info = model.transcribe(str(audio_path), **kwargs)
             return " ".join(segment.text.strip() for segment in segments).strip()
+        except MurmurError:
+            raise
         except Exception as exc:  # model download/path/runtime errors should be actionable
             raise MurmurError(
                 "faster-whisper transcription failed.",
@@ -228,31 +242,79 @@ class WhisperCppBackend:
 def transcribe(audio_path: Path, config: SttConfig, vocabulary: str | None = None, dictionary_terms: Iterable[str] | None = None) -> Transcription:
     """Transcribe audio using the configured local backend."""
     try:
-        if config.provider in ("faster-whisper", "faster_whisper"):
-            backend = FasterWhisperBackend()
-            backend.model_name = config.model
+        backend = backend_for_config(config)
+        if isinstance(backend, FasterWhisperBackend):
             backend.initial_prompt = vocabulary
-        elif config.provider in ("whisper-cpp", "whisper.cpp", "whispercpp"):
-            backend = WhisperCppBackend()
-            backend.binary = shutil.which(config.whisper_cpp_binary) or config.whisper_cpp_binary
-            if config.whisper_cpp_model is not None:
-                backend.model_path = str(config.whisper_cpp_model)
-        elif config.provider == "groq":
-            backend = GroqBackend()
-            backend.model_name = config.model or backend.model_name
-            if config.language and config.language != "auto":
-                backend.language = config.language
-        elif config.provider in ("elevenlabs", "eleven-labs", "scribe"):
-            backend = ElevenLabsBackend()
-            backend.model_name = config.model or backend.model_name
-            if config.language and config.language != "auto":
-                os.environ.setdefault("MURMUR_ELEVENLABS_LANGUAGE", config.language)
-        else:
-            backend = build_backend(config.provider)
         terms = list(dictionary_terms or [])
         return Transcription(text=backend.transcribe(audio_path, dictionary_terms=terms), provider=backend.name)
     except MurmurError as exc:
         raise SttError(exc.doctor()) from exc
+
+
+def backend_for_config(config: SttConfig) -> SttBackend:
+    if not _cacheable_backend(config.provider):
+        return _build_backend_for_config(config)
+    key = _backend_cache_key(config)
+    cached = _BACKEND_CACHE.get(key)
+    if cached is not None:
+        return cached
+    backend = _build_backend_for_config(config)
+    _BACKEND_CACHE[key] = backend
+    return backend
+
+
+def warm_stt_backend(config: SttConfig) -> str:
+    backend = backend_for_config(config)
+    warm = getattr(backend, "warm", None)
+    if callable(warm):
+        warm()
+    return backend.name
+
+
+def clear_backend_cache() -> None:
+    _BACKEND_CACHE.clear()
+
+
+def _build_backend_for_config(config: SttConfig) -> SttBackend:
+    if config.provider in ("faster-whisper", "faster_whisper"):
+        backend = FasterWhisperBackend()
+        backend.model_name = config.model
+        return backend
+    if config.provider in ("whisper-cpp", "whisper.cpp", "whispercpp"):
+        backend = WhisperCppBackend()
+        backend.binary = shutil.which(config.whisper_cpp_binary) or config.whisper_cpp_binary
+        if config.whisper_cpp_model is not None:
+            backend.model_path = str(config.whisper_cpp_model)
+        return backend
+    if config.provider == "groq":
+        backend = GroqBackend()
+        backend.model_name = config.model or backend.model_name
+        if config.language and config.language != "auto":
+            backend.language = config.language
+        return backend
+    if config.provider in ("elevenlabs", "eleven-labs", "scribe"):
+        backend = ElevenLabsBackend()
+        backend.model_name = config.model or backend.model_name
+        if config.language and config.language != "auto":
+            os.environ.setdefault("MURMUR_ELEVENLABS_LANGUAGE", config.language)
+        return backend
+    return build_backend(config.provider)
+
+
+def _backend_cache_key(config: SttConfig) -> tuple[object, ...]:
+    return (
+        config.provider,
+        config.model,
+        config.language,
+        config.whisper_cpp_binary,
+        str(config.whisper_cpp_model) if config.whisper_cpp_model is not None else None,
+        os.environ.get("MURMUR_WHISPER_DEVICE", "cpu"),
+        os.environ.get("MURMUR_WHISPER_COMPUTE_TYPE", "int8"),
+    )
+
+
+def _cacheable_backend(provider: str) -> bool:
+    return provider in ("faster-whisper", "faster_whisper", "whisper-cpp", "whisper.cpp", "whispercpp")
 
 
 def _groq_api_key() -> str | None:

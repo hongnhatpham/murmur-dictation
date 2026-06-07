@@ -34,6 +34,7 @@ from .session import (
     start_recording_session,
     stop_recording_process,
 )
+from .service import request_stop_recording, run_service
 from .status import write_status
 from .stt import SttError, transcribe
 from .transform import transform_transcript
@@ -106,6 +107,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("warm-correction", help="preload the local correction model")
     p.set_defaults(func=cmd_warm_correction)
+
+    p = sub.add_parser("service", help="run the warmed background dictation processor")
+    p.set_defaults(func=cmd_service)
 
     p = sub.add_parser("dictate", help="record, transcribe, clean, and copy/paste")
     p.add_argument("--duration", type=float, default=5.0, help="fixed recording duration in seconds")
@@ -430,6 +434,12 @@ def cmd_warm_correction(_args: argparse.Namespace) -> int:
     return 1 if result.status != "skipped" else 0
 
 
+def cmd_service(_args: argparse.Namespace) -> int:
+    cfg = load_config()
+    ensure_local_dirs(cfg)
+    return run_service(cfg, stop_recording_func=_cmd_stop_recording_direct)
+
+
 def _cleanup_processed_audio(cfg, audio_path: Path, *, keep_audio: bool) -> None:
     result = cleanup_successful_audio(
         audio_path,
@@ -708,6 +718,19 @@ def cmd_start_recording(args: argparse.Namespace) -> int:
 
 def cmd_stop_recording(args: argparse.Namespace) -> int:
     cfg = load_config()
+    ensure_local_dirs(cfg)
+    response = request_stop_recording(cfg, args)
+    if response is not None:
+        if response.stdout:
+            print(response.stdout, end="")
+        if response.stderr:
+            print(response.stderr, end="", file=sys.stderr)
+        return response.returncode
+    return _cmd_stop_recording_direct(args, cfg=cfg)
+
+
+def _cmd_stop_recording_direct(args: argparse.Namespace, cfg=None) -> int:
+    cfg = cfg or load_config()
     ensure_local_dirs(cfg)
     try:
         fd = acquire_lock(lock_path(cfg.paths.state_dir))

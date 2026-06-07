@@ -5,7 +5,7 @@ Source: `docs/product/prd.md`, `docs/engineering/architecture.md`, `docs/roadmap
 ## Doing
 
 - [ ] Manual verification: paste into one browser field and one editor/text area; HITL local STT latency/accuracy bakeoff.
-- [x] Near-instant dictation: stage timing, local/Groq fast profiles, and benchmark harness before daemon/streaming work.
+- [x] Near-instant dictation: stage timing, local/Groq fast profiles, benchmark harness, and warmed service handoff before streaming work.
 
 ## Backlog
 
