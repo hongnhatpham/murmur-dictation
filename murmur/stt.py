@@ -105,9 +105,9 @@ class GroqBackend:
         }
         if self.language:
             fields["language"] = self.language
-        prompt = _dictionary_prompt(dictionary_terms)
-        if prompt:
-            fields["prompt"] = prompt[:900]
+        # Do not pass personal dictionary terms as Groq/Whisper prompt text.
+        # On short or ambiguous clips, the model can decode the prompt itself
+        # and paste a list of vocabulary terms instead of the user's speech.
         body, content_type = _multipart_form_data(fields, file_field="file", file_path=audio_path)
         req = urllib.request.Request(
             self.endpoint,
