@@ -90,34 +90,32 @@ history = false
             config_path = Path(tmpdir_s) / "config.toml"
             config_path.write_text('[recording]\ntarget = "alsa_input.test"\n', encoding="utf-8")
             cfg = load_config(config_path)
-            with patch("murmur.doctor._pactl_sources", return_value={"70": "alsa_input.test", "alsa_input.test": "alsa_input.test"}):
+            with patch("murmur.doctor._pactl_sources", return_value={"70": "alsa_input.test", "alsa_input.test": "alsa_input.test"}), patch(
+                "murmur.doctor._default_source_detail", return_value="alsa_input.default; Volume: 1.00"
+            ):
                 checks = _recording_source_checks(cfg)
 
         self.assertEqual(checks[0].name, "recording target")
         self.assertTrue(checks[0].ok)
+        self.assertIn("overrides desktop default", checks[0].detail)
 
     def test_recording_target_check_accepts_wpctl_numeric_source(self):
         with tempfile.TemporaryDirectory() as tmpdir_s:
             config_path = Path(tmpdir_s) / "config.toml"
             config_path.write_text('[recording]\ntarget = "48"\n', encoding="utf-8")
             cfg = load_config(config_path)
-            with patch("murmur.doctor._pactl_sources", return_value={}), patch("murmur.doctor._wpctl_source_ids", return_value={"48"}):
+            with patch("murmur.doctor._pactl_sources", return_value={}), patch("murmur.doctor._wpctl_source_ids", return_value={"48"}), patch(
+                "murmur.doctor._default_source_detail", return_value="alsa_input.default; Volume: 1.00"
+            ):
                 checks = _recording_source_checks(cfg)
 
         self.assertEqual(checks[0].name, "recording target")
         self.assertTrue(checks[0].ok)
 
     def test_recording_default_source_warns_when_muted(self):
-        def fake_run_text(cmd):
-            if cmd == ["pactl", "get-default-source"]:
-                return "alsa_input.muted"
-            if cmd == ["wpctl", "get-volume", "@DEFAULT_AUDIO_SOURCE@"]:
-                return "Volume: 0.22 [MUTED]"
-            return None
-
         with tempfile.TemporaryDirectory() as tmpdir_s:
             cfg = load_config(Path(tmpdir_s) / "config.toml")
-            with patch("murmur.doctor._run_text", side_effect=fake_run_text):
+            with patch("murmur.doctor._default_source_detail", return_value="alsa_input.muted; Volume: 0.22 [MUTED]"):
                 checks = _recording_source_checks(cfg)
 
         self.assertEqual(checks[0].name, "default source")

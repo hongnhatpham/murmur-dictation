@@ -29,9 +29,9 @@ Check the machine:
 murmur doctor
 ```
 
-If `doctor` warns that the default source is muted, configure `[recording].target`
-with a source name from `pactl list sources short`. This keeps Murmur on the
-intended microphone even when the desktop default input changes.
+If `doctor` warns that the default source is muted, first fix the desktop input
+selection or unmute it. Configure `[recording].target` only when Murmur should
+intentionally ignore the desktop-selected default source.
 
 ## faster-whisper setup
 

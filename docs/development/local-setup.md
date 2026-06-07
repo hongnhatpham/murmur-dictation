@@ -64,10 +64,11 @@ python -m murmur init --overwrite
 
 ## Recording source
 
-Murmur records from PipeWire's default source unless a target is configured. If
-the default source is a muted onboard microphone, capture can produce a valid
-non-empty WAV of digital silence and STT may hallucinate text. `murmur doctor`
-warns when the default source reports muted.
+Murmur records from PipeWire's default source unless a target is configured.
+That means desktop input selection is the normal control surface. If the default
+source is a muted onboard microphone, capture can produce a valid non-empty WAV
+of digital silence and STT may hallucinate text. `murmur doctor` warns when the
+default source reports muted.
 
 Inspect sources:
 
@@ -77,7 +78,8 @@ wpctl get-volume @DEFAULT_AUDIO_SOURCE@
 pactl list sources short
 ```
 
-Pin Murmur to a known microphone without changing the desktop-wide default:
+Pin Murmur to a known microphone only when you intentionally want Murmur to
+ignore the desktop-selected default:
 
 ```toml
 [recording]
@@ -85,7 +87,8 @@ target = "alsa_input.usb-Focusrite_Scarlett_2i2_USB_Y87GQFB9923514-00.HiFi__Mic1
 ```
 
 Both `murmur dictate` and the `start-recording`/`stop-recording` hotkey path use
-this target.
+this target. Remove the `[recording]` section to return to the desktop-selected
+default source.
 
 ## Near-instant provider profiles
 

@@ -130,15 +130,28 @@ def _wpctl_source_ids() -> set[str]:
     return source_ids
 
 
+def _default_source_detail() -> str:
+    default_source = _run_text(["pactl", "get-default-source"]) or "default PipeWire source"
+    default_volume = _run_text(["wpctl", "get-volume", "@DEFAULT_AUDIO_SOURCE@"])
+    return default_source if not default_volume else f"{default_source}; {default_volume}"
+
+
 def _recording_source_checks(config: MurmurConfig) -> list[Check]:
     target = config.recording.target
     if target:
         sources = _pactl_sources()
         source_ids = _wpctl_source_ids() if target.isdigit() else set()
         if not sources and not source_ids:
-            return [Check("recording target", True, f"{target}; pactl unavailable, not validated", required=False)]
+            return [
+                Check(
+                    "recording target",
+                    True,
+                    f"{target}; overrides desktop default ({_default_source_detail()}); pactl unavailable, not validated",
+                    required=False,
+                )
+            ]
         if target in sources or target in source_ids:
-            return [Check("recording target", True, target)]
+            return [Check("recording target", True, f"{target}; overrides desktop default ({_default_source_detail()})")]
         return [
             Check(
                 "recording target",
@@ -148,18 +161,16 @@ def _recording_source_checks(config: MurmurConfig) -> list[Check]:
             )
         ]
 
-    default_source = _run_text(["pactl", "get-default-source"]) or "default PipeWire source"
-    default_volume = _run_text(["wpctl", "get-volume", "@DEFAULT_AUDIO_SOURCE@"])
-    if default_volume and "[MUTED]" in default_volume:
+    detail = _default_source_detail()
+    if "[MUTED]" in detail:
         return [
             Check(
                 "default source",
                 False,
-                f"{default_source} is muted; set [recording].target or unmute/change the default source",
+                f"{detail}; muted; unset [recording].target to use the desktop default, or set it only for an intentional override",
                 required=False,
             )
         ]
-    detail = default_source if not default_volume else f"{default_source}; {default_volume}"
     return [Check("default source", True, detail, required=False)]
 
 
