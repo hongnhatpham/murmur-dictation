@@ -151,7 +151,15 @@ impl ShortcutState {
                 .toggle
                 .as_ref()
                 .is_some_and(|toggle| chord_contains_key(toggle, key));
-        if down && chord_is_active && belongs_to_shortcut {
+        // A partial Windows-key chord cannot be hidden safely. Passing Win down but swallowing
+        // the completing key leaves Windows with a plain Win press and opens Start on release.
+        // Let the balanced modifier chord through; Ctrl+Win alone has no Windows action.
+        let windows_chord_is_active = (contains_chord(&self.pressed, &self.config.hold_to_talk)
+            && chord_contains_key(&self.config.hold_to_talk, VK_LWIN.0))
+            || self.config.toggle.as_ref().is_some_and(|toggle| {
+                contains_chord(&self.pressed, toggle) && chord_contains_key(toggle, VK_LWIN.0)
+            });
+        if down && chord_is_active && belongs_to_shortcut && !windows_chord_is_active {
             self.suppressed_keys.insert(key);
             HookDisposition::Suppress
         } else if release_was_suppressed {
@@ -413,14 +421,24 @@ mod tests {
     }
 
     #[test]
-    fn active_ctrl_win_chord_is_suppressed_from_windows() {
+    fn ctrl_win_chord_passes_a_balanced_combination_to_windows() {
         let (mut state, _receiver) = state(ShortcutConfig::default());
         assert_eq!(
             state.key_event(VK_CONTROL.0, true),
             HookDisposition::PassThrough
         );
-        assert_eq!(state.key_event(VK_LWIN.0, true), HookDisposition::Suppress);
-        assert_eq!(state.key_event(VK_LWIN.0, false), HookDisposition::Suppress);
+        assert_eq!(
+            state.key_event(VK_LWIN.0, true),
+            HookDisposition::PassThrough
+        );
+        assert_eq!(
+            state.key_event(VK_CONTROL.0, false),
+            HookDisposition::PassThrough
+        );
+        assert_eq!(
+            state.key_event(VK_LWIN.0, false),
+            HookDisposition::PassThrough
+        );
     }
 
     #[test]
@@ -431,7 +449,7 @@ mod tests {
     }
 
     #[test]
-    fn win_first_chord_never_leaves_an_unmatched_windows_key_down() {
+    fn win_first_chord_passes_a_balanced_combination_to_windows() {
         let (mut state, receiver) = state(ShortcutConfig::default());
         assert_eq!(
             state.key_event(VK_LWIN.0, true),
@@ -439,12 +457,12 @@ mod tests {
         );
         assert_eq!(
             state.key_event(VK_CONTROL.0, true),
-            HookDisposition::Suppress
+            HookDisposition::PassThrough
         );
         assert_eq!(receiver.recv().unwrap(), ShortcutEvent::BeginDictation);
         assert_eq!(
             state.key_event(VK_CONTROL.0, false),
-            HookDisposition::Suppress
+            HookDisposition::PassThrough
         );
         assert_eq!(receiver.recv().unwrap(), ShortcutEvent::FinishDictation);
         assert_eq!(
