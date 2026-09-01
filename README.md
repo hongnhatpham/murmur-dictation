@@ -1,51 +1,88 @@
-# Murmur Dictation
+# Murmur
 
-A Linux-native, Wispr Flow-inspired dictation layer for faster input everywhere on this computer.
+Murmur is a personal Windows 11 voice workspace for English, Vietnamese, and mixed-language dictation and meeting records.
 
-## Thesis
+The app uses Tauri 2, React, TypeScript, Rust, SQLite, WASAPI, Windows UI Automation, and Windows Credential Manager. Dictation streams through Deepgram Flux while the user speaks, with AssemblyAI as the live fallback. Finalized audio tries Deepgram, Groq Whisper, AssemblyAI, then local `whisper.cpp`. Meeting Sessions record microphone and system audio separately, transcribe after recording, preserve an immutable Raw Transcript, and create a cited Meeting Brief when Groq is configured.
 
-Murmur is not a general voice agent first. It is a **universal voice keyboard**: hold a hotkey, speak naturally, and get clean text inserted into the app you are already using.
+## Current operation
 
-The agentic part lives mostly in the text transformation layer: punctuation, filler removal, self-correction handling, personal vocabulary, app-aware style, selected-text rewrites, and small explicit commands like “press enter.”
+The Windows build includes:
 
-## Current status
+- Global hold-to-talk and toggle shortcuts, with `Ctrl+Win` as the default hold shortcut
+- A temporary dictation overlay with a live speech signal and clear processing states, Escape cancellation, undo-friendly insertion, and every completed result retained on the clipboard
+- Default or selected microphone capture with five-second durable WAV chunks
+- Hosted streaming and batch STT rotation with local CUDA Whisper fallback
+- English, Vietnamese, and mixed-language detection for local Whisper
+- Context exclusions for sensitive fields and applications
+- Imported, online, and in-person Meeting Sessions
+- Editable timestamped transcripts, speaker labels, cited Meeting Briefs, search, pinning, and Markdown export
+- Seven-day Dictation Session and 30-day Meeting Session retention defaults
+- Personal Vocabulary and attributed-correction learning
+- Consistent ZIP backup and staged restore without credentials
+- Redacted rotating diagnostics, deterministic setup, startup registration, and signed private-update handling
 
-First CLI tracer bullet is available as a Python prototype:
+On the current RTX 3060 laptop, the public ten-second JFK fixture completes direct local CUDA transcription in about 2.0 seconds. A fresh import reached the visible literal transcript in 3.8 seconds. Ordinary Settings loading and dictation use lightweight installation checks. Full model checksums run during installation, diagnostics, and the explicit offline speech check.
 
-```bash
-python -m pip install -e '.[stt]'
-murmur init
-murmur doctor
-murmur dictate --duration 5
-# optional focused-app insertion when wtype/ydotool is available:
-murmur dictate --duration 5 --paste
+Hosted STT, correction, Meeting Brief generation, and private updates require user-supplied credentials. Local dictation and literal meeting transcripts remain available without them. Provider validation uses each service's least-privileged speech or account endpoint, so setup does not require broader management permissions.
+
+## Run
+
+Requirements for development:
+
+- Node.js 24 or newer with Corepack
+- Rust stable
+- Windows 11 and Visual Studio C++ Build Tools
+
+```powershell
+corepack pnpm install
+corepack pnpm desktop:dev
 ```
 
-It records with `pw-record`, transcribes with a local/free STT backend (`faster-whisper` by default, or `whisper.cpp`), lightly cleans text, copies to the Wayland clipboard with `wl-copy`, can paste with `wtype`/`ydotool`, emits terse `notify-send` status, and stores local history with stage-level latency metrics. When the desktop default microphone is wrong or muted, `[recording].target` can pin capture to a specific PipeWire source. Near-instant profile work is scoped to `murmur provider-profile local` and opt-in `murmur provider-profile groq`; cloud correction stays disabled by default. `murmur service` runs a warmed background processor; `murmur stop-recording` delegates to it when available and falls back to the direct CLI path when it is not running. In the local profile, the service monitors active recordings, runs an experimental incremental recognizer while the hotkey is held, and can use a fresh partial transcript on release when any untranscribed tail is silent. `murmur benchmark ...` compares local and Groq STT against existing audio without inserting text. Successfully transcribed temporary audio is removed automatically unless debug retention is enabled; `murmur cleanup-audio` can prune the audio cache manually. A conservative `murmur command` prototype can transform clipboard/selected text with local deterministic commands (`uppercase`, `lowercase`, `concise`) and falls back safely when desktop simulation is unavailable. Local personal vocabulary and snippets are managed with `murmur dictionary ...` and `murmur snippets ...`, backed by SQLite and fed into supported local STT/context paths. See [`docs/development/cli-tracer-bullet.md`](docs/development/cli-tracer-bullet.md), [`docs/development/local-setup.md`](docs/development/local-setup.md), and [`docs/setup/wayland-niri.md`](docs/setup/wayland-niri.md) for setup.
+Run checks:
 
-## Documents
+```powershell
+corepack pnpm typecheck
+corepack pnpm test
+corepack pnpm build
+& "$env:USERPROFILE\.cargo\bin\cargo.exe" test --manifest-path src-tauri\Cargo.toml --all-targets
+```
 
-- [`docs/research/wispr-flow.md`](docs/research/wispr-flow.md) — research notes on Wispr Flow behavior and product model.
-- [`docs/product/prd.md`](docs/product/prd.md) — product requirements for the first versions.
-- [`docs/engineering/architecture.md`](docs/engineering/architecture.md) — proposed Linux/Wayland architecture.
-- [`docs/roadmap.md`](docs/roadmap.md) — phased implementation plan.
-- [`docs/development/cli-tracer-bullet.md`](docs/development/cli-tracer-bullet.md) — local CLI prototype setup and usage.
-- [`docs/development/local-setup.md`](docs/development/local-setup.md) — config defaults, dependency checks, history/recovery, dictionary, and snippets commands.
-- [`docs/setup/wayland-niri.md`](docs/setup/wayland-niri.md) — niri/Wayland hotkey, notification, and user-service setup.
-- [`docs/engineering/adr/0001-continue-python-through-mvp.md`](docs/engineering/adr/0001-continue-python-through-mvp.md) — implementation-language decision.
-- [`docs/engineering/adr/0002-local-stt-first.md`](docs/engineering/adr/0002-local-stt-first.md) — local/free STT provider decision.
-- [`docs/engineering/adr/0003-local-and-groq-near-instant-dictation.md`](docs/engineering/adr/0003-local-and-groq-near-instant-dictation.md) — local/Groq latency strategy.
+Build the native app without an installer:
 
-## Product principles
+```powershell
+corepack pnpm exec tauri build --no-bundle --debug
+```
 
-1. **Fast enough to trust** — perceived latency matters more than feature breadth.
-2. **Works anywhere text can go** — current-app insertion is the product.
-3. **Speech is messy** — cleanup should preserve intent without over-writing the user.
-4. **Reversible by default** — history, clipboard fallback, and undo are core UX.
-5. **Personal vocabulary matters** — project names, people, tools, and slang should improve over time.
-6. **No chatbot ceremony** — this should feel like an input method, not a conversation.
-7. **Explicit for risky actions** — sending, deleting, running shell commands, or submitting forms require clear intent/confirmation.
+Build the signed NSIS installer and updater artifacts after generating the local signing key:
 
-## MVP in one sentence
+```powershell
+corepack pnpm updater:key:init
+corepack pnpm desktop:build:signed
+```
 
-Hold a global hotkey, speak, release, transcribe + lightly clean the speech, and paste the result into the focused app with a small status overlay and recoverable history.
+The signing key lives under `%APPDATA%\com.bynhat.murmur\signing`, outside Git and Murmur backups. Its password is protected with Windows DPAPI for the current user.
+
+## Setup
+
+The installed application includes a structured setup CLI. Commands return JSON. `secret set` reads the value from standard input so secrets do not enter command arguments, files, logs, or Git.
+
+```powershell
+Murmur.exe --setup plan
+Murmur.exe --setup diagnose
+Murmur.exe --setup secret status
+Murmur.exe --setup secret set deepgram
+Murmur.exe --setup provider validate deepgram
+Murmur.exe --setup model install
+Murmur.exe --setup insertion check --confirm-target-ready
+```
+
+The UI can also store and validate provider credentials, install the offline model, create or restore backups, export diagnostics, and check for updates.
+
+Offline files live under `%APPDATA%\com.bynhat.murmur\models`. The setup process installs and verifies the pinned whisper.cpp CUDA 12.4 runtime and `ggml-large-v3-turbo-q5_0` model.
+
+## Product contract
+
+- [Vision](VISION.md)
+- [V1 product definition](docs/product/v1.md)
+- [Domain language](CONTEXT.md)
+- [Architecture decisions](docs/adr)

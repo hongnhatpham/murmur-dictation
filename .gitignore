@@ -1,30 +1,11 @@
-# OS/editor
-.DS_Store
-*.swp
-*.swo
-.vscode/
-.idea/
-
-# Env/secrets
-.env
-.env.*
-!.env.example
-
-# Runtime artifacts
-*.wav
-*.mp3
-*.flac
-*.ogg
-*.sqlite
-*.sqlite3
-*.db
-logs/
-tmp/
-
-# Build outputs
-target/
-dist/
-build/
 node_modules/
-__pycache__/
-.venv/
+dist/
+src-tauri/target/
+src-tauri/target-provider-operations/
+*.tsbuildinfo
+vite.config.js
+vite.config.d.ts
+vite.config.js.map
+.DS_Store
+Thumbs.db
+*.log
