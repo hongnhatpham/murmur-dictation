@@ -73,6 +73,7 @@ const LOCAL_WHISPER_RUNTIME_FILES: &[&str] = &[
     "nvrtc-builtins64_124.dll",
     "nvrtc64_120_0.dll",
 ];
+const MAX_LOCAL_WHISPER_RUNTIME_FILE_BYTES: u64 = 768 * 1024 * 1024;
 
 #[derive(Debug, Clone)]
 pub struct ProviderEndpoints {
@@ -1727,15 +1728,23 @@ pub fn install_local_whisper_runtime_archive(
                 "whisper.cpp archive is missing required runtime file {name}"
             ))
         })?;
-        if entry.is_dir() || entry.size() == 0 || entry.size() > 16 * 1024 * 1024 {
+        if entry.is_dir()
+            || entry.size() == 0
+            || entry.size() > MAX_LOCAL_WHISPER_RUNTIME_FILE_BYTES
+        {
             return Err(CoreError::InvalidInput(format!(
                 "whisper.cpp runtime file {name} has an invalid size"
             )));
         }
         let path = destination.join(name);
         let mut output = fs::File::create(&path)?;
-        let copied = std::io::copy(&mut entry.by_ref().take(16 * 1024 * 1024 + 1), &mut output)?;
-        if copied != entry.size() || copied > 16 * 1024 * 1024 {
+        let copied = std::io::copy(
+            &mut entry
+                .by_ref()
+                .take(MAX_LOCAL_WHISPER_RUNTIME_FILE_BYTES + 1),
+            &mut output,
+        )?;
+        if copied != entry.size() || copied > MAX_LOCAL_WHISPER_RUNTIME_FILE_BYTES {
             return Err(CoreError::InvalidInput(format!(
                 "whisper.cpp runtime file {name} exceeded its declared size"
             )));
@@ -2248,6 +2257,33 @@ mod tests {
         fs::write(install.join(LOCAL_WHISPER_MODEL_NAME), model_bytes).unwrap();
         let model_hash = format!("{:x}", Sha256::digest(model_bytes));
         assert!(validate_local_whisper_install_with_model_hash(&install, &model_hash).unwrap());
+    }
+
+    #[test]
+    fn runtime_archive_accepts_large_cuda_libraries() {
+        let directory = tempfile::tempdir().unwrap();
+        let archive_path = directory.path().join("runtime.zip");
+        let mut archive = zip::ZipWriter::new(fs::File::create(&archive_path).unwrap());
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+        for name in LOCAL_WHISPER_RUNTIME_FILES {
+            archive
+                .start_file(format!("Release/{name}"), options)
+                .unwrap();
+            if *name == "ggml-cuda.dll" {
+                archive.write_all(&vec![0; 17 * 1024 * 1024]).unwrap();
+            } else {
+                archive.write_all(format!("fixture-{name}").as_bytes()).unwrap();
+            }
+        }
+        archive.finish().unwrap();
+
+        let install = directory.path().join("models");
+        install_local_whisper_runtime_archive(&archive_path, &install).unwrap();
+        assert_eq!(
+            fs::metadata(install.join("ggml-cuda.dll")).unwrap().len(),
+            17 * 1024 * 1024
+        );
     }
 
     #[test]

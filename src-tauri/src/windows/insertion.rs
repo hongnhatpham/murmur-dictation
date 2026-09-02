@@ -20,6 +20,7 @@ use windows::{
                 SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, VK_CONTROL,
                 VK_V,
             },
+            WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId, IsWindow},
         },
     },
 };
@@ -32,6 +33,12 @@ use crate::{
 use super::context::insertion_target_allowed;
 
 pub struct WindowsTextInsertion;
+
+#[derive(Debug, Clone, Copy)]
+pub struct InsertionTarget {
+    window: isize,
+    process_id: u32,
+}
 
 impl WindowsTextInsertion {
     pub fn new() -> Self {
@@ -47,6 +54,37 @@ impl WindowsTextInsertion {
             .map_err(CoreError::Io)?
             .join()
             .map_err(|_| CoreError::Unavailable("insertion verification worker panicked".into()))?
+    }
+
+    /// Captures the window that should receive a Dictation Result before Murmur shows feedback.
+    pub fn capture_target(&self) -> CoreResult<InsertionTarget> {
+        let window = unsafe { GetForegroundWindow() };
+        if window.0.is_null() {
+            return Err(CoreError::Unavailable(
+                "no foreground insertion target".into(),
+            ));
+        }
+        let mut process_id = 0;
+        unsafe { GetWindowThreadProcessId(window, Some(&mut process_id)) };
+        Ok(InsertionTarget {
+            window: window.0 as isize,
+            process_id,
+        })
+    }
+
+    /// Pastes only while the window captured at dictation start remains in the foreground.
+    pub fn paste_retaining_clipboard_for_target(
+        &self,
+        text: &str,
+        target: Option<InsertionTarget>,
+    ) -> CoreResult<()> {
+        let text = text.to_string();
+        thread::Builder::new()
+            .name("murmur-targeted-clipboard-paste".into())
+            .spawn(move || paste_on_sta_for_target(&text, target))
+            .map_err(CoreError::Io)?
+            .join()
+            .map_err(|_| CoreError::Unavailable("clipboard paste worker panicked".into()))?
     }
 }
 
@@ -220,12 +258,62 @@ fn paste_on_sta(text: &str) -> CoreResult<()> {
     )
 }
 
+fn paste_on_sta_for_target(text: &str, target: Option<InsertionTarget>) -> CoreResult<()> {
+    run_targeted_paste_transaction(
+        || set_unicode_clipboard(text),
+        || target.is_some_and(InsertionTarget::is_foreground),
+        || {
+            require_allowed_target()?;
+            if !target.is_some_and(InsertionTarget::is_foreground) {
+                return Err(CoreError::Unavailable(
+                    "the dictation target changed before paste; text was kept on the clipboard"
+                        .into(),
+                ));
+            }
+            let paste = shortcut_inputs(VK_CONTROL.0, VK_V.0);
+            send_inputs(&paste, "paste text")?;
+            thread::sleep(Duration::from_millis(100));
+            Ok(())
+        },
+    )
+}
+
+impl InsertionTarget {
+    fn is_foreground(self) -> bool {
+        let window = unsafe { GetForegroundWindow() };
+        if window.0.is_null()
+            || window.0 as isize != self.window
+            || !unsafe { IsWindow(Some(window)) }.as_bool()
+        {
+            return false;
+        }
+        let mut process_id = 0;
+        unsafe { GetWindowThreadProcessId(window, Some(&mut process_id)) };
+        process_id == self.process_id
+    }
+}
+
 /// Installs the Dictation Result before attempting paste and leaves it available afterward.
 fn run_paste_transaction(
     retain_requested: impl FnOnce() -> CoreResult<()>,
     attempt_paste: impl FnOnce() -> CoreResult<()>,
 ) -> CoreResult<()> {
     retain_requested()?;
+    attempt_paste()
+}
+
+fn run_targeted_paste_transaction(
+    retain_requested: impl FnOnce() -> CoreResult<()>,
+    target_is_foreground: impl FnOnce() -> bool,
+    attempt_paste: impl FnOnce() -> CoreResult<()>,
+) -> CoreResult<()> {
+    retain_requested()?;
+    if !target_is_foreground() {
+        return Err(CoreError::Unavailable(
+            "the dictation target is unavailable or no longer focused; text was kept on the clipboard"
+                .into(),
+        ));
+    }
     attempt_paste()
 }
 
@@ -417,5 +505,29 @@ mod tests {
         );
         assert!(result.is_ok());
         assert_eq!(actions.borrow().as_slice(), ["retain requested", "paste"]);
+    }
+
+    #[test]
+    fn changed_foreground_retains_text_without_pasting() {
+        let actions = Rc::new(RefCell::new(Vec::new()));
+        let result = run_targeted_paste_transaction(
+            {
+                let actions = Rc::clone(&actions);
+                move || {
+                    actions.borrow_mut().push("retain requested");
+                    Ok(())
+                }
+            },
+            || false,
+            {
+                let actions = Rc::clone(&actions);
+                move || {
+                    actions.borrow_mut().push("paste");
+                    Ok(())
+                }
+            },
+        );
+        assert!(result.is_err());
+        assert_eq!(actions.borrow().as_slice(), ["retain requested"]);
     }
 }

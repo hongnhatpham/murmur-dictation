@@ -96,6 +96,27 @@ describe("Murmur app", () => {
     expect(screen.queryByText("User interview 04")).not.toBeInTheDocument();
   });
 
+  it("opens a failed dictation without requesting a result that was never created", async () => {
+    Object.defineProperty(window, "__TAURI_INTERNALS__", { configurable: true, value: {} });
+    vi.spyOn(bridge, "listSessions").mockResolvedValueOnce([{
+      id: "failed-dictation",
+      kind: "dictation",
+      title: "Dictation",
+      subtitle: "failed",
+      time: "11:32",
+      mode: "queued",
+      status: "failed",
+    }]);
+    const getDetail = vi.spyOn(bridge, "getDictationDetail").mockRejectedValue(
+      new Error("not found: dictation result for failed-dictation"),
+    );
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: /Dictation/ }));
+    expect(getDetail).not.toHaveBeenCalled();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByText("Processing route unavailable · Failed")).toBeInTheDocument();
+  });
+
   it("does not show Listening when native capture fails", async () => {
     vi.spyOn(bridge, "startDictation").mockRejectedValueOnce(new Error("capture adapter is unavailable"));
     render(<App />);

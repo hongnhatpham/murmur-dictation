@@ -9,7 +9,7 @@ The app uses Tauri 2, React, TypeScript, Rust, SQLite, WASAPI, Windows UI Automa
 The Windows build includes:
 
 - Global hold-to-talk and toggle shortcuts, with `Ctrl+Win` as the default hold shortcut
-- A temporary dictation overlay with a live speech signal and clear processing states, Escape cancellation, undo-friendly insertion, and every completed result retained on the clipboard
+- A non-activating dictation overlay with a live speech signal and clear processing states, Escape cancellation, target-verified undo-friendly insertion, and every completed result retained on the clipboard
 - Default or selected microphone capture with five-second durable WAV chunks
 - Hosted streaming and batch STT rotation with local CUDA Whisper fallback
 - English, Vietnamese, and mixed-language detection for local Whisper

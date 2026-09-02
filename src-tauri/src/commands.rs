@@ -15,7 +15,7 @@ use tauri_plugin_notification::NotificationExt;
 use uuid::Uuid;
 
 use crate::{
-    adapters::{AudioCapture, CaptureRequest, TextInsertion},
+    adapters::{AudioCapture, CaptureRequest},
     backup::{BackupEntry, BackupManifest},
     db::{DictationTimingRecord, Repository, VocabularyRecord},
     diagnostics::{
@@ -49,7 +49,7 @@ use crate::adapters::windows::{
     context::{active_window, capture_context, ContextCapturePolicy, ContextSnapshot},
     meeting::{MeetingApplication, MeetingPromptTracker},
     shortcut::{GlobalShortcutService, ShortcutChord, ShortcutConfig, ShortcutEvent},
-    WindowsTextInsertion,
+    InsertionTarget, WindowsTextInsertion,
 };
 
 pub struct CoreState {
@@ -82,6 +82,8 @@ pub struct ActiveRecording {
     pub streaming_result: Option<Arc<Mutex<mpsc::Receiver<Result<TranscriptionResult, String>>>>>,
     #[cfg(windows)]
     pub context: Option<ContextSnapshot>,
+    #[cfg(windows)]
+    pub insertion_target: Option<InsertionTarget>,
 }
 
 type CommandResult<T> = Result<T, CommandError>;
@@ -869,16 +871,7 @@ pub fn start_dictation_inner(app: &AppHandle, state: &CoreState) -> CommandResul
     session.expires_at =
         session.created_at + ChronoDuration::days(i64::from(preferences.dictation_retention_days));
     let output_directory = state.data_dir.join("media").join(session.id.to_string());
-    emit_dictation(
-        app,
-        Some(session.id),
-        "recording",
-        None,
-        None,
-        Some(0),
-        None,
-        None,
-    );
+    let insertion_target = state.insertion.capture_target().ok();
     set_shortcut_recording(state, true);
     let _ = state.diagnostics.record(
         DiagnosticLevel::Info,
@@ -915,6 +908,16 @@ pub fn start_dictation_inner(app: &AppHandle, state: &CoreState) -> CommandResul
         denied_applications: preferences.excluded_applications,
     })
     .ok();
+    emit_dictation(
+        app,
+        Some(session.id),
+        "recording",
+        None,
+        None,
+        Some(0),
+        context.as_ref().map(|value| value.process_name.clone()),
+        None,
+    );
     session.audio_path = Some(
         state
             .data_dir
@@ -951,6 +954,7 @@ pub fn start_dictation_inner(app: &AppHandle, state: &CoreState) -> CommandResul
         source: SessionSource::Microphone,
         streaming_result,
         context,
+        insertion_target,
     });
     emit_dictation(
         app,
@@ -1373,8 +1377,10 @@ fn process_dictation_result(
     let insertion_started = Instant::now();
     // Clipboard paste creates the target application's normal undo unit. UI Automation
     // SetValue can report success without changing the visible document in modern Notepad.
-    let (insertion_status, terminal_state) = match state.insertion.paste_retaining_clipboard(&text)
-    {
+    let insertion = state
+        .insertion
+        .paste_retaining_clipboard_for_target(&text, recording.insertion_target);
+    let (insertion_status, terminal_state) = match insertion {
         Ok(()) => (
             "clipboard_paste",
             if correction.corrected {
@@ -2457,6 +2463,7 @@ pub fn start_meeting(
             source: session_source,
             streaming_result: None,
             context: None,
+            insertion_target: None,
         });
         emit_meeting(&app, Some(session.id), "recording", Some(0), None);
         set_tray(&app, "Murmur - recording meeting");

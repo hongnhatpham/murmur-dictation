@@ -12,4 +12,4 @@ pub use audio::{
     list_microphones, CaptureActivity, CaptureEvent, MicrophoneDevice, WindowsAudioCapture,
 };
 pub use context::{observe_attributed_correction, ObservedCorrection};
-pub use insertion::WindowsTextInsertion;
+pub use insertion::{InsertionTarget, WindowsTextInsertion};
