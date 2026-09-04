@@ -51,6 +51,10 @@ use crate::adapters::windows::{
     shortcut::{GlobalShortcutService, ShortcutChord, ShortcutConfig, ShortcutEvent},
     InsertionTarget, WindowsTextInsertion,
 };
+#[cfg(windows)]
+use windows::Win32::UI::WindowsAndMessaging::{
+    SetWindowPos, HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW,
+};
 
 pub struct CoreState {
     pub repository: Mutex<Repository>,
@@ -759,7 +763,24 @@ fn emit_dictation(
                     let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
                 }
             }
-            let _ = window.show();
+            show_dictation_overlay(
+                || window.show(),
+                || {
+                    let window = window.hwnd()?;
+                    unsafe {
+                        SetWindowPos(
+                            window,
+                            Some(HWND_TOPMOST),
+                            0,
+                            0,
+                            0,
+                            0,
+                            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW,
+                        )
+                    }
+                    .map_err(|error| tauri::Error::Anyhow(error.into()))
+                },
+            );
         } else {
             let handle = app.clone();
             let _ = thread::Builder::new()
@@ -780,6 +801,14 @@ fn emit_dictation(
                 });
         }
     }
+}
+
+fn show_dictation_overlay(
+    show: impl FnOnce() -> tauri::Result<()>,
+    raise_without_activation: impl FnOnce() -> tauri::Result<()>,
+) {
+    let _ = show();
+    let _ = raise_without_activation();
 }
 
 fn emit_sessions_changed(app: &AppHandle) {
@@ -3445,6 +3474,33 @@ pub fn seek_meeting_audio(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use std::{cell::RefCell, rc::Rc};
+
+    #[test]
+    fn showing_dictation_overlay_raises_visible_window_without_activation() {
+        let actions = Rc::new(RefCell::new(Vec::new()));
+        show_dictation_overlay(
+            {
+                let actions = Rc::clone(&actions);
+                move || {
+                    actions.borrow_mut().push("show");
+                    Ok(())
+                }
+            },
+            {
+                let actions = Rc::clone(&actions);
+                move || {
+                    actions.borrow_mut().push("raise without activation");
+                    Ok(())
+                }
+            },
+        );
+        assert_eq!(
+            actions.borrow().as_slice(),
+            ["show", "raise without activation"]
+        );
+    }
 
     #[cfg(windows)]
     use crate::adapters::windows::{
