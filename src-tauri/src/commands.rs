@@ -1952,11 +1952,7 @@ fn setup_status_with_offline(
     verified_offline: Option<bool>,
 ) -> Result<SetupStatusView, CoreError> {
     let configured = secret_statuses(state.secrets.as_ref())?;
-    let providers = [
-        ("deepgram", "Deepgram"),
-        ("assemblyai", "AssemblyAI"),
-        ("groq", "Groq"),
-    ]
+    let providers = [("groq", "Groq")]
     .into_iter()
     .map(|(id, label)| {
         let is_configured = configured

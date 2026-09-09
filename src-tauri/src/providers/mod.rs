@@ -523,16 +523,7 @@ impl SpeechProviders {
         mut on_attempt: impl FnMut(ProviderAttemptStarted),
     ) -> TranscriptionOutcome {
         let mut candidates = match kind {
-            SessionKind::Dictation => vec![
-                SttProvider::DeepgramFlux,
-                SttProvider::GroqWhisper,
-                SttProvider::AssemblyAi,
-            ],
-            SessionKind::Meeting => vec![
-                SttProvider::DeepgramNova3,
-                SttProvider::GroqWhisper,
-                SttProvider::AssemblyAi,
-            ],
+            SessionKind::Dictation | SessionKind::Meeting => vec![SttProvider::GroqWhisper],
         };
         candidates.retain(|provider| self.provider_configured(*provider));
         if local.is_some() {

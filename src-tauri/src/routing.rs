@@ -79,11 +79,7 @@ pub struct RouteState {
 
 impl RouteState {
     pub fn for_dictation(local_available: bool) -> Self {
-        let mut candidates = vec![
-            SttProvider::DeepgramFlux,
-            SttProvider::GroqWhisper,
-            SttProvider::AssemblyAi,
-        ];
+        let mut candidates = vec![SttProvider::GroqWhisper];
         if local_available {
             candidates.push(SttProvider::LocalWhisper);
         }
@@ -91,11 +87,7 @@ impl RouteState {
     }
 
     pub fn for_meeting(local_available: bool) -> Self {
-        let mut candidates = vec![
-            SttProvider::DeepgramNova3,
-            SttProvider::GroqWhisper,
-            SttProvider::AssemblyAi,
-        ];
+        let mut candidates = vec![SttProvider::GroqWhisper];
         if local_available {
             candidates.push(SttProvider::LocalWhisper);
         }
@@ -221,7 +213,19 @@ mod tests {
             route.fail(ProviderFailure::PoorQuality),
             RouteDecision::RetryCurrent
         );
-        assert_eq!(route.current_provider(), Some(SttProvider::DeepgramFlux));
+        assert_eq!(route.current_provider(), Some(SttProvider::GroqWhisper));
+    }
+
+    #[test]
+    fn transcript_routes_only_use_groq_and_optional_local() {
+        assert_eq!(
+            RouteState::for_dictation(false).candidates,
+            vec![SttProvider::GroqWhisper]
+        );
+        assert_eq!(
+            RouteState::for_meeting(true).candidates,
+            vec![SttProvider::GroqWhisper, SttProvider::LocalWhisper]
+        );
     }
 
     #[test]
@@ -231,29 +235,15 @@ mod tests {
             route.fail(ProviderFailure::Timeout),
             RouteDecision::RetryCurrent
         );
-        assert_eq!(
-            route.fail(ProviderFailure::Timeout),
-            RouteDecision::Switched
-        );
-        assert_eq!(route.current_provider(), Some(SttProvider::GroqWhisper));
-        assert_eq!(route.processing_mode(), ProcessingMode::HostedFallback);
+        assert_eq!(route.fail(ProviderFailure::Timeout), RouteDecision::Switched);
+        assert_eq!(route.current_provider(), Some(SttProvider::LocalWhisper));
+        assert_eq!(route.processing_mode(), ProcessingMode::Local);
     }
 
     #[test]
     fn dictation_exhaustion_inserts_raw() {
         let mut route = RouteState::for_dictation(false);
-        assert_eq!(
-            route.fail(ProviderFailure::QuotaExhausted),
-            RouteDecision::Switched
-        );
-        assert_eq!(
-            route.fail(ProviderFailure::Authentication),
-            RouteDecision::Switched
-        );
-        assert_eq!(
-            route.fail(ProviderFailure::Service),
-            RouteDecision::InsertRaw
-        );
+        assert_eq!(route.fail(ProviderFailure::QuotaExhausted), RouteDecision::InsertRaw);
         assert_eq!(route.status, RouteStatus::Exhausted);
     }
 

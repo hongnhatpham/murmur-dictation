@@ -9,7 +9,7 @@ type Notice = { kind: "success" | "error" | "attention"; text: string } | null;
 const statusText: Record<SessionSummary["status"], string> = { inserted: "Inserted", clipboard: "On clipboard", raw: "Raw", capturing: "Capturing", processing: "Processing", completed: "Transcribed", failed: "Failed", cancelled: "Cancelled", "brief-ready": "Brief ready", "brief-pending": "Brief pending" };
 const sampleSetup: SetupStatus = {
   checks: [{ id: "microphone", label: "Microphone", detail: "Browser preview cannot test Windows audio", state: "unavailable" }, { id: "insertion", label: "Text insertion", detail: "Browser preview cannot test accessibility insertion", state: "unavailable" }, { id: "offline", label: "Offline speech", detail: "Large V3 Turbo is shown as a fixture", state: "unavailable" }],
-  providers: [{ id: "deepgram", label: "Deepgram", configured: false, state: "missing", detail: "Not connected" }, { id: "assemblyai", label: "AssemblyAI", configured: false, state: "missing", detail: "Not connected" }, { id: "groq", label: "Groq", configured: false, state: "missing", detail: "Not connected" }],
+  providers: [{ id: "groq", label: "Groq", configured: false, state: "missing", detail: "Not connected" }],
   update: { state: "current", detail: "Sample status · Browser preview" },
 };
 

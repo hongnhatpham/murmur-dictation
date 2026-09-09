@@ -383,7 +383,7 @@ pub fn run_diagnostics_with(
     }
     checks.push(DiagnosticCheck {
         id: "hosted_stt".into(),
-        status: if ["deepgram", "assemblyai", "groq"]
+        status: if ["groq"]
             .iter()
             .any(|name| configured_secrets.contains(name))
         {
@@ -391,7 +391,7 @@ pub fn run_diagnostics_with(
         } else {
             CheckStatus::Fail
         },
-        message: if ["deepgram", "assemblyai", "groq"]
+        message: if ["groq"]
             .iter()
             .any(|name| configured_secrets.contains(name))
         {
