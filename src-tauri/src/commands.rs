@@ -30,12 +30,12 @@ use crate::{
     error::{CommandError, CoreError},
     providers::{
         download_checked_model, install_local_whisper_runtime_archive, is_empty_brief_entry,
-        local_whisper_install_is_present, validate_local_whisper_install, AudioRequest,
-        CorrectionRequest, ExplicitTransformAction, LiveAudioPacket, LiveAudioSamples,
-        LocalWhisperConfig, MeetingBriefRequest, SpeechProviders, TranscriptionOutcome,
-        TranscriptionResult, VocabularyReplacement, LOCAL_WHISPER_MODEL_NAME,
-        LOCAL_WHISPER_MODEL_SHA256, LOCAL_WHISPER_MODEL_URL, LOCAL_WHISPER_RUNTIME_SHA256,
-        LOCAL_WHISPER_RUNTIME_URL,
+        local_whisper_install_is_present, normalize_meeting_audio_chunks,
+        validate_local_whisper_install, AudioRequest, CleanupLevel, CorrectionRequest,
+        ExplicitTransformAction, LiveAudioPacket, LiveAudioSamples, LocalWhisperConfig,
+        MeetingBriefRequest, SpeechProviders, TranscriptionOutcome, TranscriptionResult,
+        VocabularyReplacement, LOCAL_WHISPER_MODEL_NAME, LOCAL_WHISPER_MODEL_SHA256,
+        LOCAL_WHISPER_MODEL_URL, LOCAL_WHISPER_RUNTIME_SHA256, LOCAL_WHISPER_RUNTIME_URL,
     },
     retention::{RetentionReport, RetentionService},
     routing::{ProviderFailure, RouteDecision, RouteState},
@@ -154,6 +154,8 @@ pub struct Preferences {
     pub excluded_applications: Vec<String>,
     #[serde(default)]
     pub excluded_meeting_applications: Vec<String>,
+    #[serde(default)]
+    pub cleanup_level: CleanupLevel,
 }
 
 fn default_hold_shortcut() -> String {
@@ -174,6 +176,7 @@ impl Default for Preferences {
             microphone_id: None,
             excluded_applications: vec![],
             excluded_meeting_applications: vec![],
+            cleanup_level: CleanupLevel::Light,
         }
     }
 }
@@ -1382,9 +1385,13 @@ fn process_dictation_result(
         })
         .collect();
     let context = usable_correction_context(recording.context.as_ref());
+    let cleanup_level = read_preferences(&state.data_dir)
+        .map(|preferences| preferences.cleanup_level)
+        .unwrap_or_default();
     let correction_started = Instant::now();
     let correction = providers.correct_dictation(&CorrectionRequest {
         raw_transcript: raw.text(),
+        cleanup_level,
         application: context.map(|value| value.process_name.clone()),
         window_title: context.map(|value| value.window_title.clone()),
         selected_text: context.and_then(|value| value.selected_text.clone()),
@@ -1632,7 +1639,8 @@ fn apply_spoken_formatting(value: &str) -> String {
     output.trim().to_string()
 }
 
-fn merge_audio_chunks(files: &[PathBuf], destination: &Path) -> Result<PathBuf, CoreError> {
+/// Concatenates same-format WAV chunks into `destination` for the meeting pipeline and test harness.
+pub fn merge_audio_chunks(files: &[PathBuf], destination: &Path) -> Result<PathBuf, CoreError> {
     if files.is_empty() {
         return Err(CoreError::Unavailable(
             "the microphone produced no audio".into(),
@@ -1953,24 +1961,24 @@ fn setup_status_with_offline(
 ) -> Result<SetupStatusView, CoreError> {
     let configured = secret_statuses(state.secrets.as_ref())?;
     let providers = [("groq", "Groq")]
-    .into_iter()
-    .map(|(id, label)| {
-        let is_configured = configured
-            .iter()
-            .any(|status| status.name == id && status.configured);
-        ProviderStatusView {
-            id: id.into(),
-            label: label.into(),
-            configured: is_configured,
-            state: if is_configured { "ready" } else { "missing" },
-            detail: if is_configured {
-                "Credential stored in Windows Credential Manager".into()
-            } else {
-                "Run murmur-setup secret set and pass the value through stdin".into()
-            },
-        }
-    })
-    .collect();
+        .into_iter()
+        .map(|(id, label)| {
+            let is_configured = configured
+                .iter()
+                .any(|status| status.name == id && status.configured);
+            ProviderStatusView {
+                id: id.into(),
+                label: label.into(),
+                configured: is_configured,
+                state: if is_configured { "ready" } else { "missing" },
+                detail: if is_configured {
+                    "Credential stored in Windows Credential Manager".into()
+                } else {
+                    "Run murmur-setup secret set and pass the value through stdin".into()
+                },
+            }
+        })
+        .collect();
     let offline = verified_offline
         .unwrap_or_else(|| local_whisper_install_is_present(&state.data_dir.join("models")));
     #[cfg(windows)]
@@ -2759,65 +2767,78 @@ fn process_meeting_result(
             continue;
         }
         let audio_path = if group.len() == 1 && !is_wav(&group[0]) {
-            group[0].clone()
+            vec![(group[0].clone(), 0)]
         } else {
-            merge_audio_chunks(
+            let merged = merge_audio_chunks(
                 &group,
                 &state
                     .data_dir
                     .join("media")
                     .join(session_id.to_string())
                     .join(format!("{label}.wav")),
+            )?;
+            normalize_meeting_audio_chunks(
+                &merged,
+                &state.data_dir.join("media").join(session_id.to_string()),
+                label,
             )?
+            .into_iter()
+            .map(|chunk| (chunk.path, chunk.offset_ms))
+            .collect()
         };
-        let outcome = providers.transcribe_with_fallback_observed(
-            SessionKind::Meeting,
-            &AudioRequest::from_file(&audio_path, mime_type(&audio_path))?,
-            local.as_ref(),
-            |attempt| {
-                emit_meeting(
-                    app,
-                    Some(session_id),
-                    "processing",
-                    None,
-                    Some(format!(
-                        "{} via {}",
-                        mode_label(attempt.mode),
-                        attempt.provider
-                    )),
-                );
-            },
-        );
-        let (transcription, failures) = match outcome {
-            TranscriptionOutcome::Completed {
-                transcript,
-                attempts,
-            } => (transcript, attempts.len()),
-            TranscriptionOutcome::PendingEnhancement { attempts } => {
-                return Err(CoreError::Unavailable(
-                    attempts
-                        .last()
-                        .map(|failure| failure.message.clone())
-                        .unwrap_or_else(|| "no speech provider is configured".into()),
-                ))
+        for (audio_path, offset_ms) in audio_path {
+            let outcome = providers.transcribe_with_fallback_observed(
+                SessionKind::Meeting,
+                &AudioRequest::from_file(&audio_path, mime_type(&audio_path))?,
+                local.as_ref(),
+                |attempt| {
+                    emit_meeting(
+                        app,
+                        Some(session_id),
+                        "processing",
+                        None,
+                        Some(format!(
+                            "{} via {}",
+                            mode_label(attempt.mode),
+                            attempt.provider
+                        )),
+                    );
+                },
+            );
+            let (transcription, failures) = match outcome {
+                TranscriptionOutcome::Completed {
+                    transcript,
+                    attempts,
+                } => (transcript, attempts.len()),
+                TranscriptionOutcome::PendingEnhancement { attempts } => {
+                    return Err(CoreError::Unavailable(
+                        attempts
+                            .last()
+                            .map(|failure| failure.message.clone())
+                            .unwrap_or_else(|| "no speech provider is configured".into()),
+                    ))
+                }
+                TranscriptionOutcome::Failed { .. } => unreachable!(),
+            };
+            let group_mode = processing_mode(&transcription.provider, failures);
+            if group_mode == ProcessingMode::Local {
+                mode = ProcessingMode::Local;
+            } else if group_mode == ProcessingMode::HostedFallback && mode != ProcessingMode::Local
+            {
+                mode = ProcessingMode::HostedFallback;
             }
-            TranscriptionOutcome::Failed { .. } => unreachable!(),
-        };
-        let group_mode = processing_mode(&transcription.provider, failures);
-        if group_mode == ProcessingMode::Local {
-            mode = ProcessingMode::Local;
-        } else if group_mode == ProcessingMode::HostedFallback && mode != ProcessingMode::Local {
-            mode = ProcessingMode::HostedFallback;
-        }
-        language = language.or(transcription.language.clone());
-        provider_names.push(transcription.provider.clone());
-        let mut raw_group = to_raw_transcript(session_id, transcription).segments;
-        for segment in &mut raw_group {
-            if segment.speaker.is_none() {
-                segment.speaker = speaker_fallback.map(str::to_owned);
+            language = language.or(transcription.language.clone());
+            provider_names.push(transcription.provider.clone());
+            let mut raw_group = to_raw_transcript(session_id, transcription).segments;
+            for segment in &mut raw_group {
+                segment.start_ms = segment.start_ms.saturating_add(offset_ms);
+                segment.end_ms = segment.end_ms.saturating_add(offset_ms);
+                if segment.speaker.is_none() {
+                    segment.speaker = speaker_fallback.map(str::to_owned);
+                }
             }
+            segments.extend(raw_group);
         }
-        segments.extend(raw_group);
     }
     segments.sort_by_key(|segment| (segment.start_ms, segment.end_ms));
     for (ordinal, segment) in segments.iter_mut().enumerate() {
@@ -3472,6 +3493,19 @@ mod tests {
     use super::*;
 
     use std::{cell::RefCell, rc::Rc};
+
+    #[test]
+    fn preferences_without_cleanup_level_default_to_light() {
+        let preferences: Preferences = serde_json::from_str(
+            r#"{"contextCapture":true,"launchAtStartup":true,"meetingSuggestions":true,"offlineModel":true,"dictationRetentionDays":7,"meetingRetentionDays":30}"#,
+        )
+        .unwrap();
+        assert_eq!(preferences.cleanup_level, CleanupLevel::Light);
+
+        let medium: Preferences =
+            serde_json::from_value(serde_json::json!({"contextCapture":true,"launchAtStartup":true,"meetingSuggestions":true,"offlineModel":true,"dictationRetentionDays":7,"meetingRetentionDays":30,"cleanupLevel":"medium"})).unwrap();
+        assert_eq!(medium.cleanup_level, CleanupLevel::Medium);
+    }
 
     #[test]
     fn showing_dictation_overlay_raises_visible_window_without_activation() {

@@ -17,10 +17,12 @@ export interface MeetingDetail {
   topics?: BriefItem[]; decisions: BriefItem[]; actions: BriefItem[]; questions: BriefItem[]; notableMoments?: BriefItem[]; followUps?: BriefItem[]; turns: TranscriptTurn[];
 }
 export interface VocabularyEntry { id: string; spoken: string; replacement: string; source: "manual" | "learned"; uses: number }
+export type CleanupLevel = "light" | "medium";
 export interface Preferences {
   contextCapture: boolean; launchAtStartup: boolean; meetingSuggestions: boolean; offlineModel: boolean;
   dictationRetentionDays: number; meetingRetentionDays: number; holdShortcut: string; toggleShortcut: string;
   microphoneId: string | null; excludedApplications: string[]; excludedMeetingApplications: string[];
+  cleanupLevel: CleanupLevel;
 }
 export type CheckState = "ready" | "missing" | "checking" | "error" | "unavailable";
 export interface SetupCheck { id: string; label: string; detail: string; state: CheckState }

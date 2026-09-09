@@ -25,8 +25,12 @@ A human-corrected version of a Raw Transcript that preserves its source and timi
 _Avoid_: Raw transcript, meeting notes
 
 **Dictation Result**:
-The lightly corrected text produced by a Dictation Session for insertion or copying.
+The corrected text produced by a Dictation Session for insertion or copying.
 _Avoid_: Transcript, rewrite
+
+**Cleanup Level**:
+The user's chosen distance between Raw Transcript and Dictation Result: Light keeps the spoken words and fixes only mechanics, Medium also resolves self-corrections, fillers, and clearly misheard words.
+_Avoid_: Rewrite mode, correction strength, aggressiveness
 
 **Meeting Brief**:
 A cited account of a Meeting Session containing only transcript-supported summaries, decisions, action items, and open questions.

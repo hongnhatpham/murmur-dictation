@@ -9,7 +9,7 @@ if (typeof window !== "undefined" && !window.localStorage) {
       setItem: (key: string, value: string) => values.set(key, String(value)),
       removeItem: (key: string) => values.delete(key),
       clear: () => values.clear(),
-    } as Storage,
+    } as unknown as Storage,
   });
 }
 

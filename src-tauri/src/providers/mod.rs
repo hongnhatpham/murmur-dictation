@@ -38,10 +38,14 @@ use crate::{
 pub const GROQ_WHISPER_MODEL: &str = "whisper-large-v3-turbo";
 pub const GROQ_CORRECTION_MODEL: &str = "openai/gpt-oss-20b";
 pub const GROQ_MEETING_MODEL: &str = "openai/gpt-oss-120b";
+const GROQ_AUDIO_CHUNK_BYTES: usize = 20 * 1024 * 1024;
 const MEETING_GROUNDING_RULES: &str = "Treat the meeting title as organizational metadata only, never as evidence. Use only the supplied timestamped transcript or notes as evidence. Do not infer speaker identity, quote attribution or source, or facts from outside knowledge.";
 const DICTATION_HOSTED_ATTEMPT_TIMEOUT: Duration = Duration::from_secs(5);
 const DICTATION_ASSEMBLY_DEADLINE: Duration = Duration::from_secs(10);
-const DICTATION_CORRECTION_TIMEOUT: Duration = Duration::from_secs(1);
+// Measured with `live_correction_levels` (reasoning_effort=low on gpt-oss-20b, about 100 calls
+// over both levels and samples): p50 0.8 s, p95 1.6 s, worst 2.3 s. Three seconds absorbs
+// hosted latency spikes without stalling the dictation overlay on a raw insert.
+const DICTATION_CORRECTION_TIMEOUT: Duration = Duration::from_secs(3);
 pub const LOCAL_WHISPER_MODEL_NAME: &str = "ggml-large-v3-turbo-q5_0.bin";
 pub const LOCAL_WHISPER_MODEL_URL: &str = "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-large-v3-turbo-q5_0.bin";
 pub const LOCAL_WHISPER_MODEL_SHA256: &str =
@@ -104,6 +108,180 @@ pub struct AudioRequest {
     pub bytes: Vec<u8>,
     pub mime_type: String,
     pub source_path: Option<PathBuf>,
+}
+
+/// A provider-sized, normalized meeting audio file and its position in the source recording.
+#[derive(Debug, Clone)]
+pub struct MeetingAudioChunk {
+    pub path: PathBuf,
+    pub offset_ms: u64,
+}
+
+/// Converts captured WAV audio to mono 16 kHz PCM and splits it below Groq's upload limit.
+/// Non-WAV imports stay in their original format because the hosted providers decode them.
+pub fn normalize_meeting_audio_chunks(
+    source: &Path,
+    destination_directory: &Path,
+    stem: &str,
+) -> CoreResult<Vec<MeetingAudioChunk>> {
+    let bytes = fs::read(source)?;
+    if bytes.len() < 12 || &bytes[0..4] != b"RIFF" || &bytes[8..12] != b"WAVE" {
+        return Ok(vec![MeetingAudioChunk {
+            path: source.to_path_buf(),
+            offset_ms: 0,
+        }]);
+    }
+    let (sample_rate, channels, format_tag, bits_per_sample, data) =
+        parse_wav_for_normalization(&bytes)?;
+    if channels == 0 || sample_rate == 0 {
+        return Err(CoreError::InvalidInput(
+            "WAV has an invalid audio format".into(),
+        ));
+    }
+    let frame_bytes = usize::from(channels)
+        .checked_mul(usize::from(bits_per_sample / 8))
+        .ok_or_else(|| CoreError::InvalidInput("WAV frame size overflow".into()))?;
+    if frame_bytes == 0 || data.len() % frame_bytes != 0 {
+        return Err(CoreError::InvalidInput(
+            "WAV data is not frame aligned".into(),
+        ));
+    }
+    let mono = wav_to_mono(data, channels, format_tag, bits_per_sample)?;
+    let output_frames = ((mono.len() as u64 * 16_000 + u64::from(sample_rate) / 2)
+        / u64::from(sample_rate)) as usize;
+    let mut resampled = Vec::with_capacity(output_frames);
+    for index in 0..output_frames {
+        let position = index as f64 * f64::from(sample_rate) / 16_000.0;
+        let lower = position.floor() as usize;
+        let upper = (lower + 1).min(mono.len().saturating_sub(1));
+        let fraction = (position - lower as f64) as f32;
+        let value = if mono.is_empty() {
+            0.0
+        } else {
+            mono[lower.min(mono.len() - 1)]
+                + (mono[upper] - mono[lower.min(mono.len() - 1)]) * fraction
+        };
+        resampled.push(float_to_pcm16(value));
+    }
+    let frames_per_chunk = (GROQ_AUDIO_CHUNK_BYTES / 2).max(1);
+    let mut chunks = Vec::new();
+    for (index, frame_slice) in resampled.chunks(frames_per_chunk).enumerate() {
+        let path = destination_directory.join(format!("{stem}-normalized-{index:05}.wav"));
+        write_pcm16_wav(
+            &path,
+            &frame_slice
+                .iter()
+                .flat_map(|sample| sample.to_le_bytes())
+                .collect::<Vec<_>>(),
+        )?;
+        chunks.push(MeetingAudioChunk {
+            path,
+            offset_ms: ((index * frames_per_chunk) as u64 * 1_000) / 16_000,
+        });
+    }
+    if chunks.is_empty() {
+        let path = destination_directory.join(format!("{stem}-normalized-00000.wav"));
+        write_pcm16_wav(&path, &[])?;
+        chunks.push(MeetingAudioChunk { path, offset_ms: 0 });
+    }
+    Ok(chunks)
+}
+
+fn parse_wav_for_normalization(bytes: &[u8]) -> CoreResult<(u32, u16, u16, u16, &[u8])> {
+    let mut cursor = 12usize;
+    let mut format = None;
+    let mut data = None;
+    while cursor + 8 <= bytes.len() {
+        let id = &bytes[cursor..cursor + 4];
+        let length = u32::from_le_bytes(bytes[cursor + 4..cursor + 8].try_into().unwrap()) as usize;
+        let start = cursor + 8;
+        let end = start
+            .checked_add(length)
+            .ok_or_else(|| CoreError::InvalidInput("WAV chunk overflow".into()))?;
+        if end > bytes.len() {
+            return Err(CoreError::InvalidInput("WAV chunk exceeds file".into()));
+        }
+        if id == b"fmt " && length >= 16 {
+            let mut tag = u16::from_le_bytes(bytes[start..start + 2].try_into().unwrap());
+            if tag == 0xfffe && length >= 40 {
+                tag = u16::from_le_bytes(bytes[start + 24..start + 26].try_into().unwrap());
+            }
+            format = Some((
+                u32::from_le_bytes(bytes[start + 4..start + 8].try_into().unwrap()),
+                u16::from_le_bytes(bytes[start + 2..start + 4].try_into().unwrap()),
+                tag,
+                u16::from_le_bytes(bytes[start + 14..start + 16].try_into().unwrap()),
+            ));
+        } else if id == b"data" {
+            data = Some(&bytes[start..end]);
+        }
+        cursor = end + (length & 1);
+    }
+    let (rate, channels, tag, bits) =
+        format.ok_or_else(|| CoreError::InvalidInput("WAV has no format chunk".into()))?;
+    let data = data.ok_or_else(|| CoreError::InvalidInput("WAV has no data chunk".into()))?;
+    Ok((rate, channels, tag, bits, data))
+}
+
+fn wav_to_mono(data: &[u8], channels: u16, format_tag: u16, bits: u16) -> CoreResult<Vec<f32>> {
+    let bytes_per_sample = usize::from(bits / 8);
+    if !matches!((format_tag, bits), (1, 16 | 24 | 32) | (3, 32)) || bytes_per_sample == 0 {
+        return Err(CoreError::InvalidInput(
+            "WAV format must be PCM16/24/32 or float32".into(),
+        ));
+    }
+    let frame_bytes = usize::from(channels) * bytes_per_sample;
+    Ok(data
+        .chunks_exact(frame_bytes)
+        .map(|frame| {
+            frame
+                .chunks_exact(bytes_per_sample)
+                .map(|sample| match (format_tag, bits) {
+                    (3, 32) => f32::from_le_bytes(sample.try_into().unwrap()),
+                    (1, 16) => {
+                        i16::from_le_bytes(sample.try_into().unwrap()) as f32 / i16::MAX as f32
+                    }
+                    (1, 24) => {
+                        let value = i32::from_le_bytes([
+                            sample[0],
+                            sample[1],
+                            sample[2],
+                            if sample[2] & 0x80 != 0 { 0xff } else { 0 },
+                        ]);
+                        value as f32 / 8_388_607.0
+                    }
+                    (1, 32) => {
+                        i32::from_le_bytes(sample.try_into().unwrap()) as f32 / 2_147_483_647.0
+                    }
+                    _ => 0.0,
+                })
+                .sum::<f32>()
+                / f32::from(channels)
+        })
+        .collect())
+}
+
+fn write_pcm16_wav(path: &Path, data: &[u8]) -> CoreResult<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let data_len = u32::try_from(data.len())
+        .map_err(|_| CoreError::Unavailable("normalized audio exceeds WAV limits".into()))?;
+    let mut output = fs::File::create(path)?;
+    output.write_all(b"RIFF")?;
+    output.write_all(&(36u32 + data_len).to_le_bytes())?;
+    output.write_all(b"WAVEfmt ")?;
+    output.write_all(&16u32.to_le_bytes())?;
+    output.write_all(&1u16.to_le_bytes())?;
+    output.write_all(&1u16.to_le_bytes())?;
+    output.write_all(&16_000u32.to_le_bytes())?;
+    output.write_all(&32_000u32.to_le_bytes())?;
+    output.write_all(&2u16.to_le_bytes())?;
+    output.write_all(&16u16.to_le_bytes())?;
+    output.write_all(b"data")?;
+    output.write_all(&data_len.to_le_bytes())?;
+    output.write_all(data)?;
+    Ok(())
 }
 
 impl AudioRequest {
@@ -887,13 +1065,16 @@ impl SpeechProviders {
     }
 
     pub fn correct_dictation(&self, request: &CorrectionRequest) -> CorrectionOutcome {
-        match self.complete_groq_chat_with_timeout(
-            GROQ_CORRECTION_MODEL,
-            correction_messages(request),
+        match self.send_groq_chat(
+            dictation_chat_body(
+                GROQ_CORRECTION_MODEL,
+                correction_messages(request),
+                &request.raw_transcript,
+            ),
             Some(self.dictation_correction_timeout),
         ) {
             Ok(text) if !text.trim().is_empty() => CorrectionOutcome {
-                text,
+                text: normalize_hyphens(&text),
                 corrected: true,
                 provider: Some(GROQ_CORRECTION_MODEL.into()),
                 error: None,
@@ -914,17 +1095,24 @@ impl SpeechProviders {
                 "text transform input is empty",
             ));
         }
-        self.complete_groq_chat(GROQ_CORRECTION_MODEL, transform_messages(input, action))
-            .and_then(|text| {
-                if text.trim().is_empty() {
-                    Err(ProviderError::new(
-                        ProviderFailure::Service,
-                        "text transform response was empty",
-                    ))
-                } else {
-                    Ok(text)
-                }
-            })
+        self.send_groq_chat(
+            dictation_chat_body(
+                GROQ_CORRECTION_MODEL,
+                transform_messages(input, action),
+                input,
+            ),
+            None,
+        )
+        .and_then(|text| {
+            if text.trim().is_empty() {
+                Err(ProviderError::new(
+                    ProviderFailure::Service,
+                    "text transform response was empty",
+                ))
+            } else {
+                Ok(text)
+            }
+        })
     }
 
     /// Generate timestamp-preserving chunk notes, then synthesize the fixed brief. Failure is
@@ -995,13 +1183,15 @@ impl SpeechProviders {
         model: &str,
         messages: Vec<Value>,
     ) -> Result<String, ProviderError> {
-        self.complete_groq_chat_with_timeout(model, messages, None)
+        self.send_groq_chat(
+            json!({"model": model, "messages": messages, "temperature": 0.1}),
+            None,
+        )
     }
 
-    fn complete_groq_chat_with_timeout(
+    fn send_groq_chat(
         &self,
-        model: &str,
-        messages: Vec<Value>,
+        body: Value,
         timeout: Option<Duration>,
     ) -> Result<String, ProviderError> {
         let key = required_key(&self.credentials.groq, "Groq")?;
@@ -1010,17 +1200,21 @@ impl SpeechProviders {
             .client
             .post(&url)
             .header(AUTHORIZATION, format!("Bearer {key}"))
-            .json(&json!({
-                "model": model,
-                "messages": messages,
-                "temperature": 0.1
-            }));
+            .json(&body);
         if let Some(timeout) = timeout {
             request = request.timeout(timeout);
         }
         let response = checked_response(request.send().map_err(classify_reqwest)?, &url)?;
         let value: Value = response.json().map_err(parse_provider_response)?;
-        value["choices"][0]["message"]["content"]
+        let choice = &value["choices"][0];
+        // A truncated answer is never a usable correction, brief, or translation.
+        if choice["finish_reason"] == "length" {
+            return Err(ProviderError::new(
+                ProviderFailure::Service,
+                "Groq response was truncated by the completion limit",
+            ));
+        }
+        choice["message"]["content"]
             .as_str()
             .map(str::to_owned)
             .ok_or_else(|| {
@@ -1032,9 +1226,20 @@ impl SpeechProviders {
     }
 }
 
+/// How much a Dictation Result may differ from the Raw Transcript. Light is the default and
+/// keeps the speaker's words; Medium keeps only the speaker's own self-corrections.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum CleanupLevel {
+    #[default]
+    Light,
+    Medium,
+}
+
 #[derive(Debug, Clone)]
 pub struct CorrectionRequest {
     pub raw_transcript: String,
+    pub cleanup_level: CleanupLevel,
     pub application: Option<String>,
     pub window_title: Option<String>,
     pub selected_text: Option<String>,
@@ -1091,6 +1296,45 @@ pub struct GeneratedMeetingBrief {
     pub chunk_count: usize,
 }
 
+/// Chat body for the low-latency dictation paths. gpt-oss is a reasoning model: without these
+/// parameters it spends the whole correction timeout on hidden reasoning tokens.
+fn dictation_chat_body(model: &str, messages: Vec<Value>, input: &str) -> Value {
+    json!({
+        "model": model,
+        "messages": messages,
+        "temperature": 0.1,
+        "reasoning_effort": "low",
+        "include_reasoning": false,
+        "max_completion_tokens": completion_budget(input),
+    })
+}
+
+/// Output is about the input's length (Vietnamese tokenizes near one token per character), and
+/// the hidden low-effort reasoning counts against the same limit, so the floor stays generous.
+/// The cap only bounds runaway generation; a hit is reported as truncation, never inserted.
+fn completion_budget(input: &str) -> u32 {
+    (input.chars().count() as u32 * 2 + 1_024).min(8_192)
+}
+
+/// gpt-oss likes typographic hyphens, which dictation never intends and diff poorly in editors.
+fn normalize_hyphens(text: &str) -> String {
+    text.replace(['\u{2010}', '\u{2011}'], "-")
+}
+
+const LIGHT_CLEANUP_PROMPT: &str = "You clean up dictated speech with the lightest touch. Fix punctuation, capitalization, plural and subject-verb agreement, and obvious grammar slips. Remove only pure non-lexical fillers (um, uh, erm). Keep every other word in its original order, including false starts, repeated words, and spoken self-corrections such as \"sorry, I mean\". Do not rephrase, restructure, summarize, or add anything.";
+
+const MEDIUM_CLEANUP_PROMPT: &str = "You turn a raw dictation into the clean sentence the speaker meant to say. Apply these steps in order:\n1. Personal Vocabulary: write every listed heard term as its write form wherever it appears.\n2. Self-corrections: when the speaker restarts or corrects a phrase (signalled by \"sorry\", \"I mean\", \"no wait\", \"actually\", \"not X, Y\", or by repeating the phrase with a change), delete the first attempt and the signal word and keep only the final version. Examples: \"send it to the design team, sorry, the platform team, before the demo\" becomes \"send it to the platform team before the demo\"; \"I want the local LLM, sorry, the local transcription model to run offline\" becomes \"I want the local transcription model to run offline\".\n3. Fillers: remove um, uh, erm, stutters, repeated words, and meaningless verbal fillers (you know, like, of course, basically, sort of). Example: \"they can, of course, do the export\" becomes \"they can do the export\".\n4. Misrecognitions: replace any other word that was clearly misrecognized when the context makes the intended word obvious.\n5. Mechanics: fix punctuation, capitalization, agreement, and obvious slips so each sentence reads naturally.\nKeep the speaker's wording, tone, sentence openers, order of ideas, and every sentence. Never drop ideas, add content, summarize, or rewrite heavily.";
+
+const CLEANUP_RULES: &str = "Rules: Apply every Personal Vocabulary replacement listed in the context (heard => write), including inside names and product terms. Every word stays in the language it was spoken in: never translate any word, not even connectors like \"and\", and keep English, Vietnamese, and mixed-language text as spoken. Keep spoken formatting commands verbatim (new line, new paragraph, bullet, numbered item, open quote, close quote, literal) because they are processed afterwards. Use plain ASCII hyphens, apostrophes, and quotation marks. Return only the corrected text, with no quotes, labels, or commentary.";
+
+fn cleanup_prompt(level: CleanupLevel) -> String {
+    let instructions = match level {
+        CleanupLevel::Light => LIGHT_CLEANUP_PROMPT,
+        CleanupLevel::Medium => MEDIUM_CLEANUP_PROMPT,
+    };
+    format!("{instructions}\n\n{CLEANUP_RULES}")
+}
+
 fn correction_messages(request: &CorrectionRequest) -> Vec<Value> {
     let vocabulary = request
         .personal_vocabulary
@@ -1099,16 +1343,15 @@ fn correction_messages(request: &CorrectionRequest) -> Vec<Value> {
         .collect::<Vec<_>>()
         .join("\n");
     let context = format!(
-        "Application: {}\nWindow: {}\nSelected text: {}\nSurrounding text: {}\nPersonal Vocabulary replacements:\n{}",
+        "Application: {}\nWindow: {}\nSelected text: {}\nSurrounding text: {}",
         request.application.as_deref().unwrap_or("unknown"),
         request.window_title.as_deref().unwrap_or("unknown"),
         request.selected_text.as_deref().unwrap_or(""),
         request.surrounding_text.as_deref().unwrap_or(""),
-        vocabulary
     );
     vec![
-        json!({"role":"system","content":"Lightly correct the dictation for punctuation, filler words, obvious grammar, and the supplied Personal Vocabulary. Preserve meaning and preserve English, Vietnamese, and mixed-language phrases. Do not translate or aggressively rewrite. Return only the corrected dictation."}),
-        json!({"role":"user","content":format!("Context:\n{context}\n\nRaw Transcript:\n{}", request.raw_transcript)}),
+        json!({"role":"system","content":cleanup_prompt(request.cleanup_level)}),
+        json!({"role":"user","content":format!("Context:\n{context}\n\nPersonal Vocabulary (heard => write):\n{vocabulary}\n\nRaw Transcript:\n{}", request.raw_transcript)}),
     ]
 }
 
@@ -1232,7 +1475,8 @@ pub(crate) fn is_empty_brief_entry(line: &str) -> bool {
         || normalized.starts_with("no explicit action item")
 }
 
-fn validate_meeting_brief(
+/// Checks the fixed headings and that every decision or action item cites a transcript timestamp.
+pub fn validate_meeting_brief(
     markdown: &str,
     transcript_segments: &[TranscriptSegment],
 ) -> Result<(), String> {
@@ -2032,6 +2276,47 @@ mod tests {
     }
 
     #[test]
+    fn meeting_audio_is_downmixed_resampled_and_kept_under_provider_limit() {
+        let directory = tempfile::tempdir().unwrap();
+        let source = directory.path().join("capture.wav");
+        let mut input = Vec::new();
+        for _ in 0..48_000 {
+            input.extend_from_slice(&0.5f32.to_le_bytes());
+            input.extend_from_slice(&(-0.5f32).to_le_bytes());
+        }
+        let mut wav = Vec::new();
+        wav.extend_from_slice(b"RIFF");
+        wav.extend_from_slice(&(36 + input.len() as u32).to_le_bytes());
+        wav.extend_from_slice(b"WAVEfmt ");
+        wav.extend_from_slice(&16u32.to_le_bytes());
+        wav.extend_from_slice(&3u16.to_le_bytes());
+        wav.extend_from_slice(&2u16.to_le_bytes());
+        wav.extend_from_slice(&48_000u32.to_le_bytes());
+        wav.extend_from_slice(&384_000u32.to_le_bytes());
+        wav.extend_from_slice(&8u16.to_le_bytes());
+        wav.extend_from_slice(&32u16.to_le_bytes());
+        wav.extend_from_slice(b"data");
+        wav.extend_from_slice(&(input.len() as u32).to_le_bytes());
+        wav.extend_from_slice(&input);
+        fs::write(&source, wav).unwrap();
+
+        let chunks = normalize_meeting_audio_chunks(&source, directory.path(), "meeting").unwrap();
+        assert_eq!(chunks.len(), 1);
+        let output = fs::read(&chunks[0].path).unwrap();
+        assert_eq!(&output[0..4], b"RIFF");
+        assert_eq!(u16::from_le_bytes(output[22..24].try_into().unwrap()), 1);
+        assert_eq!(
+            u32::from_le_bytes(output[24..28].try_into().unwrap()),
+            16_000
+        );
+        assert_eq!(u16::from_le_bytes(output[34..36].try_into().unwrap()), 16);
+        assert_eq!(output.len(), 44 + 16_000 * 2);
+        assert!(output[44..]
+            .chunks_exact(2)
+            .all(|sample| { i16::from_le_bytes(sample.try_into().unwrap()).unsigned_abs() < 4 }));
+    }
+
+    #[test]
     fn deepgram_parser_preserves_vietnamese_and_timestamps() {
         let value = json!({"results":{"channels":[{"detected_language":"vi","alternatives":[{"transcript":"Xin chào Hong","words":[{"punctuated_word":"Xin","start":0.0,"end":0.2,"confidence":0.9},{"punctuated_word":"chào","start":0.2,"end":0.5,"confidence":0.9}]}]}]}});
         let result = parse_deepgram(value, "deepgram_nova_3").unwrap();
@@ -2264,7 +2549,9 @@ mod tests {
             if *name == "ggml-cuda.dll" {
                 archive.write_all(&vec![0; 17 * 1024 * 1024]).unwrap();
             } else {
-                archive.write_all(format!("fixture-{name}").as_bytes()).unwrap();
+                archive
+                    .write_all(format!("fixture-{name}").as_bytes())
+                    .unwrap();
             }
         }
         archive.finish().unwrap();
@@ -2311,7 +2598,6 @@ mod tests {
             !validate_local_whisper_install_with_model_hash(&install, &"0".repeat(64)).unwrap()
         );
     }
-
 
     #[test]
     fn dictation_timeouts_do_not_shorten_meeting_operations() {
@@ -2366,11 +2652,9 @@ mod tests {
         );
         assert_eq!(
             providers.dictation_correction_timeout,
-            Duration::from_secs(1)
+            Duration::from_secs(3)
         );
     }
-
-
 
     #[test]
     fn correction_timeout_returns_raw_dictation_without_waiting_for_client_timeout() {
@@ -2395,6 +2679,7 @@ mod tests {
         );
         let request = CorrectionRequest {
             raw_transcript: "xin chao Nhat".into(),
+            cleanup_level: CleanupLevel::Light,
             application: None,
             window_title: None,
             selected_text: None,
@@ -2414,6 +2699,7 @@ mod tests {
     fn correction_prompt_is_separate_from_stt_request() {
         let request = CorrectionRequest {
             raw_transcript: "hello nhat".into(),
+            cleanup_level: CleanupLevel::Light,
             application: None,
             window_title: None,
             selected_text: None,
@@ -2433,6 +2719,162 @@ mod tests {
             .as_str()
             .unwrap()
             .contains("nhat => Nhat"));
+    }
+
+    #[test]
+    fn correction_request_limits_reasoning_on_the_reasoning_model() {
+        let body = dictation_chat_body(GROQ_CORRECTION_MODEL, vec![], "hello nhat");
+
+        assert_eq!(body["model"], GROQ_CORRECTION_MODEL);
+        assert_eq!(body["reasoning_effort"], "low");
+        assert_eq!(body["include_reasoning"], false);
+        assert_eq!(
+            body["max_completion_tokens"],
+            completion_budget("hello nhat")
+        );
+        assert!(completion_budget("hello nhat") >= 1_024);
+        assert_eq!(completion_budget(&"x".repeat(10_000)), 8_192);
+    }
+
+    #[test]
+    fn truncated_correction_falls_back_to_raw_dictation() {
+        let (endpoint, _) = mock_server(vec![(
+            200,
+            r#"{"choices":[{"finish_reason":"length","message":{"content":"So I want"}}]}"#,
+        )]);
+        let providers = SpeechProviders::with_endpoints(
+            ProviderCredentials {
+                deepgram: None,
+                assemblyai: None,
+                groq: Some("test".into()),
+            },
+            ProviderEndpoints {
+                groq: endpoint,
+                ..ProviderEndpoints::default()
+            },
+        )
+        .unwrap();
+        let request = CorrectionRequest {
+            raw_transcript: "so I want groq to auto‑correct".into(),
+            cleanup_level: CleanupLevel::Medium,
+            application: None,
+            window_title: None,
+            selected_text: None,
+            surrounding_text: None,
+            personal_vocabulary: vec![],
+        };
+
+        let outcome = providers.correct_dictation(&request);
+
+        assert!(!outcome.corrected);
+        assert_eq!(outcome.text, request.raw_transcript);
+        assert!(outcome.error.unwrap().contains("truncated"));
+        assert_eq!(normalize_hyphens("auto\u{2011}correct"), "auto-correct");
+    }
+
+    #[test]
+    fn cleanup_level_selects_the_correction_prompt() {
+        let light = cleanup_prompt(CleanupLevel::Light);
+        let medium = cleanup_prompt(CleanupLevel::Medium);
+
+        assert_ne!(light, medium);
+        assert!(light.contains("spoken self-corrections"));
+        assert!(medium.contains("keep only the final version"));
+        for prompt in [&light, &medium] {
+            assert!(prompt.contains("never translate"));
+            assert!(prompt.contains("new paragraph"));
+        }
+        let request = CorrectionRequest {
+            raw_transcript: "hello".into(),
+            cleanup_level: CleanupLevel::Medium,
+            application: None,
+            window_title: None,
+            selected_text: None,
+            surrounding_text: None,
+            personal_vocabulary: vec![],
+        };
+        assert_eq!(correction_messages(&request)[0]["content"], medium);
+    }
+
+    /// Live measurement against Groq with the user's stored key. Run with
+    /// `cargo test live_correction_levels -- --ignored --nocapture` and set LIVE_ROUNDS to
+    /// repeat; the printed p95 justifies DICTATION_CORRECTION_TIMEOUT.
+    #[test]
+    #[ignore]
+    fn live_correction_levels() {
+        use crate::secrets::{SecretStore, WindowsCredentialStore};
+        let groq = WindowsCredentialStore
+            .get("groq")
+            .expect("credential store")
+            .expect("groq key is configured");
+        let providers = SpeechProviders::new(ProviderCredentials {
+            deepgram: None,
+            assemblyai: None,
+            groq: Some(groq),
+        })
+        .unwrap()
+        .with_dictation_timeouts(
+            Duration::from_secs(5),
+            Duration::from_secs(10),
+            Duration::from_secs(20),
+        );
+        let samples = [
+            "So I want Grog and local LLM, sorry, local transcription LLM or model to have the same capability. So they can, of course, do the transcript and then auto-correction as well.",
+            "gửi lại bản tóm tắt sau cuộc họp nhé, uh, and ping the team about the fixture set",
+        ];
+        let rounds: usize = std::env::var("LIVE_ROUNDS")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(1);
+        let mut latencies = Vec::new();
+        for round in 0..rounds {
+            for sample in samples {
+                for level in [CleanupLevel::Light, CleanupLevel::Medium] {
+                    let request = CorrectionRequest {
+                        raw_transcript: sample.into(),
+                        cleanup_level: level,
+                        application: Some("Code.exe".into()),
+                        window_title: Some("murmur-dictation".into()),
+                        selected_text: None,
+                        surrounding_text: None,
+                        personal_vocabulary: vec![VocabularyReplacement {
+                            heard: "Grog".into(),
+                            replacement: "Groq".into(),
+                        }],
+                    };
+                    // Space calls out and back off once on a free-tier 429; a second 429 is
+                    // skipped so the sample measures the model, not the rate limiter.
+                    thread::sleep(Duration::from_millis(400));
+                    let mut started = Instant::now();
+                    let mut outcome = providers.correct_dictation(&request);
+                    if outcome.error.as_deref().is_some_and(|e| e.contains("429")) {
+                        thread::sleep(Duration::from_secs(15));
+                        started = Instant::now();
+                        outcome = providers.correct_dictation(&request);
+                        if outcome.error.as_deref().is_some_and(|e| e.contains("429")) {
+                            println!("round {round} {level:?} skipped: rate limited");
+                            continue;
+                        }
+                    }
+                    let elapsed = started.elapsed();
+                    latencies.push(elapsed);
+                    println!(
+                        "round {round} {level:?} {elapsed:?} corrected={} error={:?}\n  {}",
+                        outcome.corrected, outcome.error, outcome.text
+                    );
+                    assert!(outcome.corrected, "{:?}", outcome.error);
+                }
+            }
+        }
+        latencies.sort();
+        let p95 = latencies[(latencies.len() * 95 / 100).min(latencies.len() - 1)];
+        println!(
+            "n={} p50={:?} p95={:?} max={:?}",
+            latencies.len(),
+            latencies[latencies.len() / 2],
+            p95,
+            latencies[latencies.len() - 1]
+        );
     }
 
     #[test]
@@ -2553,7 +2995,6 @@ mod tests {
         ));
         assert!(!is_empty_brief_entry("- Ship the release"));
     }
-
 
     #[test]
     fn unconfigured_hosted_providers_are_skipped() {

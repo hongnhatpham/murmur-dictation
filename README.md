@@ -17,11 +17,14 @@ The Windows build includes:
 - Imported, online, and in-person Meeting Sessions
 - Editable timestamped transcripts, speaker labels, cited Meeting Briefs, search, pinning, and Markdown export
 - Seven-day Dictation Session and 30-day Meeting Session retention defaults
+- Light or Medium dictation cleanup through Groq GPT-OSS 20B for every STT route, with raw insertion when hosted correction fails
 - Personal Vocabulary and attributed-correction learning
 - Consistent ZIP backup and staged restore without credentials
 - Redacted rotating diagnostics, deterministic setup, startup registration, and signed private-update handling
 
 On the current RTX 3060 laptop, the public ten-second JFK fixture completes direct local CUDA transcription in about 2.0 seconds. A fresh import reached the visible literal transcript in 3.8 seconds. Ordinary Settings loading and dictation use lightweight installation checks. Full model checksums run during installation, diagnostics, and the explicit offline speech check.
+
+Dictation cleanup runs after every transcription route, hosted or local. Light (default) fixes punctuation, capitalization, and obvious grammar and keeps the spoken words, including self-corrections. Medium also keeps only the corrected version of a self-correction, drops fillers and false starts, and fixes clearly misheard words from context or Personal Vocabulary. Correction requests use `reasoning_effort: low`, `include_reasoning: false`, and a length-derived `max_completion_tokens`; measured p95 latency is about 1.6 s, so the correction timeout is 3 s and a timeout inserts the Raw Transcript marked `Raw`.
 
 Hosted STT, correction, Meeting Brief generation, and private updates require user-supplied credentials. Local dictation and literal meeting transcripts remain available without them. Provider validation uses each service's least-privileged speech or account endpoint, so setup does not require broader management permissions.
 

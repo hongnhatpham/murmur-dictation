@@ -155,7 +155,10 @@ fn classify_meeting(process: &str, title: &str) -> Option<MeetingApplication> {
         return Some(MeetingApplication::Teams);
     }
     if matches!(executable, "chrome" | "msedge" | "firefox" | "brave")
-        && contains_any(&title, &["meet -", "- meet", "google meet"])
+        && contains_any(
+            &title,
+            &["meet -", "- meet", "google meet", "meet.google.com"],
+        )
     {
         return Some(MeetingApplication::GoogleMeet);
     }

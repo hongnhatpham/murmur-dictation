@@ -348,6 +348,20 @@ describe("Murmur app", () => {
     await waitFor(() => expect(save).toHaveBeenCalledWith(expect.objectContaining({ excludedMeetingApplications: ["Discord"] })));
   });
 
+  it("saves the selected dictation cleanup level", async () => {
+    Object.defineProperty(window, "__TAURI_INTERNALS__", { configurable: true, value: {} });
+    vi.spyOn(bridge, "listSessions").mockResolvedValue([]);
+    vi.spyOn(bridge, "getPreferences").mockResolvedValue(defaultPreferences);
+    vi.spyOn(bridge, "getSetupStatus").mockResolvedValue(nativeSetup);
+    vi.spyOn(bridge, "listAudioDevices").mockResolvedValue([]);
+    const save = vi.spyOn(bridge, "savePreferences").mockResolvedValue();
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    fireEvent.change(await screen.findByLabelText("Dictation cleanup"), { target: { value: "medium" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(save).toHaveBeenCalledWith(expect.objectContaining({ cleanupLevel: "medium" })));
+  });
+
   it("treats a canceled backup picker as neutral", async () => {
     Object.defineProperty(window, "__TAURI_INTERNALS__", { configurable: true, value: {} });
     vi.spyOn(bridge, "listSessions").mockResolvedValue([]);

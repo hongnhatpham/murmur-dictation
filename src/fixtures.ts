@@ -43,4 +43,5 @@ export const defaultPreferences: Preferences = {
   holdShortcut: "Ctrl+Win", toggleShortcut: "Ctrl+Win+Space", microphoneId: null,
   excludedApplications: ["1Password", "Bitwarden", "KeePassXC", "Windows Security"],
   excludedMeetingApplications: [],
+  cleanupLevel: "light",
 };

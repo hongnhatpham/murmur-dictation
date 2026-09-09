@@ -235,7 +235,10 @@ mod tests {
             route.fail(ProviderFailure::Timeout),
             RouteDecision::RetryCurrent
         );
-        assert_eq!(route.fail(ProviderFailure::Timeout), RouteDecision::Switched);
+        assert_eq!(
+            route.fail(ProviderFailure::Timeout),
+            RouteDecision::Switched
+        );
         assert_eq!(route.current_provider(), Some(SttProvider::LocalWhisper));
         assert_eq!(route.processing_mode(), ProcessingMode::Local);
     }
@@ -243,7 +246,10 @@ mod tests {
     #[test]
     fn dictation_exhaustion_inserts_raw() {
         let mut route = RouteState::for_dictation(false);
-        assert_eq!(route.fail(ProviderFailure::QuotaExhausted), RouteDecision::InsertRaw);
+        assert_eq!(
+            route.fail(ProviderFailure::QuotaExhausted),
+            RouteDecision::InsertRaw
+        );
         assert_eq!(route.status, RouteStatus::Exhausted);
     }
 

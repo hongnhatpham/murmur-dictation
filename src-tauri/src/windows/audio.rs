@@ -522,19 +522,25 @@ impl AudioCapture for WindowsAudioCapture {
             Arc::clone(&packets),
         )?;
         workers.push(microphone);
-        match microphone_ready.recv_timeout(Duration::from_secs(2)) {
-            Ok(Ok(())) => {}
-            Ok(Err(error)) => {
-                stop.store(true, Ordering::Release);
-                let _ = workers.pop().expect("microphone worker exists").join();
-                return Err(CoreError::Unavailable(error));
-            }
-            Err(_) => {
-                stop.store(true, Ordering::Release);
-                let _ = workers.pop().expect("microphone worker exists").join();
-                return Err(CoreError::Unavailable(
-                    "microphone capture exited during startup".into(),
-                ));
+        // Online calls can still be captured from the render loopback when the configured
+        // microphone is unavailable. Keep the worker report so the meeting can explain the
+        // missing microphone channel instead of failing before a session is persisted.
+        let microphone_ready_result = microphone_ready.recv_timeout(Duration::from_secs(2));
+        if !request.include_system_audio {
+            match microphone_ready_result {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => {
+                    stop.store(true, Ordering::Release);
+                    let _ = workers.pop().expect("microphone worker exists").join();
+                    return Err(CoreError::Unavailable(error));
+                }
+                Err(_) => {
+                    stop.store(true, Ordering::Release);
+                    let _ = workers.pop().expect("microphone worker exists").join();
+                    return Err(CoreError::Unavailable(
+                        "microphone capture exited during startup".into(),
+                    ));
+                }
             }
         }
         if request.include_system_audio {
