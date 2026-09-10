@@ -20,50 +20,64 @@ The Windows build includes:
 - Light or Medium dictation cleanup through Groq GPT-OSS 20B for every STT route, with raw insertion when hosted correction fails
 - Personal Vocabulary and attributed-correction learning
 - Consistent ZIP backup and staged restore without credentials
-- Redacted rotating diagnostics, deterministic setup, startup registration, and signed private-update handling
+- Redacted rotating diagnostics, deterministic setup, startup registration, and signed GitHub-release update handling
 
 On the current RTX 3060 laptop, the public ten-second JFK fixture completes direct local CUDA transcription in about 2.0 seconds. A fresh import reached the visible literal transcript in 3.8 seconds. Ordinary Settings loading and dictation use lightweight installation checks. Full model checksums run during installation, diagnostics, and the explicit offline speech check.
 
 Dictation cleanup runs after every transcription route, hosted or local. Light (default) fixes punctuation, capitalization, and obvious grammar and keeps the spoken words, including self-corrections. Medium also keeps only the corrected version of a self-correction, drops fillers and false starts, and fixes clearly misheard words from context or Personal Vocabulary. Correction requests use `reasoning_effort: low`, `include_reasoning: false`, and a length-derived `max_completion_tokens`; measured p95 latency is about 1.6 s, so the correction timeout is 3 s and a timeout inserts the Raw Transcript marked `Raw`.
 
-Hosted STT, correction, Meeting Brief generation, and private updates require user-supplied credentials. Local dictation and literal meeting transcripts remain available without them. Provider validation uses each service's least-privileged speech or account endpoint, so setup does not require broader management permissions.
+Hosted STT, correction, and Meeting Brief generation require user-supplied credentials. Updates from public GitHub releases do not require a token; a private release source does. Local dictation and literal meeting transcripts remain available without credentials. Provider validation uses each service's least-privileged speech or account endpoint, so setup does not require broader management permissions.
 
 ## Run
 
 Requirements for development:
 
-- Node.js 24 or newer with Corepack
+- Node.js 24 or newer and pnpm 10
 - Rust stable
 - Windows 11 and Visual Studio C++ Build Tools
 
 ```powershell
-corepack pnpm install
-corepack pnpm desktop:dev
+pnpm install
+pnpm desktop:dev
 ```
 
 Run checks:
 
 ```powershell
-corepack pnpm typecheck
-corepack pnpm test
-corepack pnpm build
+pnpm typecheck
+pnpm test
+pnpm build
 & "$env:USERPROFILE\.cargo\bin\cargo.exe" test --manifest-path src-tauri\Cargo.toml --all-targets
 ```
 
 Build the native app without an installer:
 
 ```powershell
-corepack pnpm exec tauri build --no-bundle --debug
+pnpm exec tauri build --no-bundle --debug
 ```
 
 Build the signed NSIS installer and updater artifacts after generating the local signing key:
 
 ```powershell
-corepack pnpm updater:key:init
-corepack pnpm desktop:build:signed
+pnpm updater:key:init
+pnpm desktop:build:signed
 ```
 
 The signing key lives under `%APPDATA%\com.bynhat.murmur\signing`, outside Git and Murmur backups. Its password is protected with Windows DPAPI for the current user.
+
+The signed build verifies the production frontend, embedded updater key, installer signature, and configured version. It then writes `latest.json` beside the installer in `src-tauri\target\release\bundle\nsis`.
+
+## Install and release 0.3.0
+
+Install the per-user NSIS package produced by the signed build:
+
+```powershell
+& .\src-tauri\target\release\bundle\nsis\Murmur_0.3.0_x64-setup.exe
+```
+
+Do not install Murmur by copying an executable produced by an arbitrary `cargo build`. The signed Tauri build embeds the production frontend and updater trust key, and the verifier rejects builds missing either one.
+
+Publish `Murmur_0.3.0_x64-setup.exe`, `Murmur_0.3.0_x64-setup.exe.sig`, and `latest.json` as assets on the public GitHub release tagged `v0.3.0`. Murmur treats this as a minor update from 0.2.x.
 
 ## Setup
 

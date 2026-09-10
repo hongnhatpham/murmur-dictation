@@ -14,7 +14,7 @@ $random = [Security.Cryptography.RandomNumberGenerator]::Create()
 try { $random.GetBytes($bytes) } finally { $random.Dispose() }
 $password = [Convert]::ToBase64String($bytes)
 
-corepack pnpm exec tauri signer generate --ci --password $password --write-keys $privateKey
+pnpm exec tauri signer generate --ci --password $password --write-keys $privateKey
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 $protectedPassword = ConvertFrom-SecureString (ConvertTo-SecureString $password -AsPlainText -Force)

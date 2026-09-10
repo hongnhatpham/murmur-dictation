@@ -798,7 +798,7 @@ impl Repository {
         }
         self.connection.execute(
             "INSERT INTO personal_vocabulary (id, heard, replacement, observations, learned, updated_at) VALUES (?1, ?2, ?3, 1, 0, ?4)
-             ON CONFLICT(heard, replacement) DO UPDATE SET observations = observations + 1, learned = CASE WHEN observations + 1 >= 3 THEN 1 ELSE learned END, updated_at = excluded.updated_at",
+             ON CONFLICT(heard, replacement) DO UPDATE SET observations = CASE WHEN observations = 0 THEN 0 ELSE observations + 1 END, learned = CASE WHEN observations + 1 >= 3 THEN 1 ELSE learned END, updated_at = excluded.updated_at",
             params![Uuid::new_v4().to_string(), heard, replacement, timestamp(Utc::now())],
         )?;
         self.connection
@@ -826,6 +826,15 @@ impl Repository {
             })?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(records)
+    }
+
+    /// Manually supplied entries are immediate; observed edits activate after three matches.
+    pub fn dictation_vocabulary(&self) -> CoreResult<Vec<VocabularyRecord>> {
+        Ok(self
+            .list_vocabulary()?
+            .into_iter()
+            .filter(|entry| entry.observations == 0 || entry.learned)
+            .collect())
     }
 
     pub fn add_vocabulary(
@@ -868,7 +877,7 @@ impl Repository {
             ));
         }
         let changed = self.connection.execute(
-            "UPDATE personal_vocabulary SET heard = ?2, replacement = ?3, updated_at = ?4 WHERE id = ?1",
+            "UPDATE personal_vocabulary SET heard = ?2, replacement = ?3, observations = CASE WHEN heard = ?2 AND replacement = ?3 THEN observations ELSE 0 END, learned = CASE WHEN heard = ?2 AND replacement = ?3 THEN learned ELSE 0 END, updated_at = ?4 WHERE id = ?1",
             params![id.to_string(), heard, replacement, timestamp(Utc::now())],
         )?;
         ensure_changed(changed, "vocabulary entry", id)
@@ -1188,12 +1197,56 @@ mod tests {
         assert!(!repository
             .observe_attributed_correction("knat", "Nhat")
             .unwrap());
+        assert!(repository.dictation_vocabulary().unwrap().is_empty());
         assert!(!repository
             .observe_attributed_correction("knat", "Nhat")
             .unwrap());
+        assert!(repository.dictation_vocabulary().unwrap().is_empty());
         assert!(repository
             .observe_attributed_correction("knat", "Nhat")
             .unwrap());
+        assert_eq!(repository.dictation_vocabulary().unwrap().len(), 1);
+        let learned = repository.dictation_vocabulary().unwrap().remove(0);
+        repository
+            .update_vocabulary(learned.id, "knat", "Nhat")
+            .unwrap();
+        assert!(repository.dictation_vocabulary().unwrap()[0].learned);
+    }
+
+    #[test]
+    fn manual_vocabulary_remains_active_after_observation_and_edit() {
+        let mut repository = Repository::in_memory().unwrap();
+        let manual = repository.add_vocabulary("knat", "Nhat").unwrap();
+        repository
+            .observe_attributed_correction("knat", "Nhat")
+            .unwrap();
+        assert_eq!(repository.dictation_vocabulary().unwrap().len(), 1);
+        repository
+            .update_vocabulary(manual.id, "knat", "Nhat Pham")
+            .unwrap();
+        assert_eq!(
+            repository.dictation_vocabulary().unwrap()[0].replacement,
+            "Nhat Pham"
+        );
+        repository
+            .observe_attributed_correction("an old sentence", "A past dictation")
+            .unwrap();
+        assert_eq!(repository.list_vocabulary().unwrap().len(), 2);
+        assert_eq!(repository.dictation_vocabulary().unwrap().len(), 1);
+        let candidate = repository
+            .list_vocabulary()
+            .unwrap()
+            .into_iter()
+            .find(|entry| entry.heard == "an old sentence")
+            .unwrap();
+        repository
+            .update_vocabulary(candidate.id, &candidate.heard, &candidate.replacement)
+            .unwrap();
+        assert_eq!(repository.dictation_vocabulary().unwrap().len(), 1);
+        repository
+            .update_vocabulary(candidate.id, &candidate.heard, "An edited phrase")
+            .unwrap();
+        assert_eq!(repository.dictation_vocabulary().unwrap().len(), 2);
     }
 
     #[test]

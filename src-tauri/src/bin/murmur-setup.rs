@@ -99,6 +99,11 @@ fn execute(args: Vec<String>) -> Result<(String, serde_json::Value), (String, St
     let command = command_name(&args);
     let result = (|| -> Result<serde_json::Value, CliError> {
         Ok(match args.as_slice() {
+            [build, info] if build == "build" && info == "info" => serde_json::json!({
+                "version": env!("CARGO_PKG_VERSION"),
+                "embeddedFrontend": cfg!(feature = "custom-protocol"),
+                "updaterKeyConfigured": murmur_core::updates::EMBEDDED_UPDATER_PUBLIC_KEY.is_some_and(|key| !key.trim().is_empty()),
+            }),
             [value] if value == "plan" => json_value(deterministic_setup_plan()),
             [value] if value == "diagnose" => {
                 let data_dir = default_data_dir()?;
@@ -202,20 +207,20 @@ fn execute(args: Vec<String>) -> Result<(String, serde_json::Value), (String, St
             [updates, check, owner, repository, current]
                 if updates == "updates" && check == "check" =>
             {
-                let token = required_secret("github_updates")?;
+                let token = optional_secret("github_updates")?.unwrap_or_default();
                 let client = GitHubUpdateClient::new(
                     token,
-                    GitHubUpdateConfig::private_repository(owner, repository),
+                    GitHubUpdateConfig::public_repository(owner, repository),
                 )?;
                 json_value(client.check(current)?)
             }
             [updates, download, owner, repository, current, directory]
                 if updates == "updates" && download == "download" =>
             {
-                let token = required_secret("github_updates")?;
+                let token = optional_secret("github_updates")?.unwrap_or_default();
                 let client = GitHubUpdateClient::new(
                     token,
-                    GitHubUpdateConfig::private_repository(owner, repository),
+                    GitHubUpdateConfig::public_repository(owner, repository),
                 )?;
                 let update = client
                     .check(current)?
@@ -233,6 +238,13 @@ fn execute(args: Vec<String>) -> Result<(String, serde_json::Value), (String, St
                         );
                     })?;
                 json_value(handoff)
+            }
+            [updates, verify, directory] if updates == "updates" && verify == "verify" => {
+                let public_key =
+                    murmur_core::updates::EMBEDDED_UPDATER_PUBLIC_KEY.ok_or_else(|| {
+                        CliError("the application has no embedded updater trust key".into())
+                    })?;
+                json_value(verify_ready_update(Path::new(directory), public_key)?)
             }
             [updates, verify, directory, public_key]
                 if updates == "updates" && verify == "verify" =>
@@ -260,7 +272,7 @@ fn command_name(args: &[String]) -> String {
 }
 
 fn usage() -> &'static str {
-    "usage: murmur-setup plan | diagnose [--data-dir PATH] | secret set|delete|status [NAME] | provider validate NAME | insertion check --confirm-target-ready [DATA_DIR] | model install [DATA_DIR] | model download URL SHA256 PATH | model validate PATH SHA256 | backup create DATA_DIR ZIP | backup restore ZIP DATA_DIR | startup enable EXE | updates check OWNER REPO CURRENT_VERSION | updates download OWNER REPO CURRENT_VERSION DIRECTORY | updates verify DIRECTORY PUBLIC_KEY. secret set reads the value from standard input"
+    "usage: murmur-setup plan | build info | diagnose [--data-dir PATH] | secret set|delete|status [NAME] | provider validate NAME | insertion check --confirm-target-ready [DATA_DIR] | model install [DATA_DIR] | model download URL SHA256 PATH | model validate PATH SHA256 | backup create DATA_DIR ZIP | backup restore ZIP DATA_DIR | startup enable EXE | updates check OWNER REPO CURRENT_VERSION | updates download OWNER REPO CURRENT_VERSION DIRECTORY | updates verify DIRECTORY [PUBLIC_KEY]. secret set reads the value from standard input"
 }
 
 fn progress(operation: &'static str) -> impl FnMut(u64, Option<u64>) {
@@ -308,10 +320,8 @@ fn install_local_model(data_dir: &Path) -> Result<serde_json::Value, CliError> {
     }))
 }
 
-fn required_secret(name: &str) -> Result<String, CliError> {
-    WindowsCredentialStore
-        .get(name)?
-        .ok_or_else(|| CliError(format!("{name} credential is not configured")))
+fn optional_secret(name: &str) -> Result<Option<String>, CliError> {
+    WindowsCredentialStore.get(name).map_err(Into::into)
 }
 
 fn insertion_check(data_dir: &Path) -> Result<serde_json::Value, CliError> {

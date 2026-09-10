@@ -1,3 +1,3 @@
-# Distribute updates through private GitHub Releases
+# Distribute updates through public GitHub Releases
 
-Murmur retrieves Tauri-signed artifacts from private GitHub Releases using a fine-grained `Contents: read` token scoped to this repository and stored in Windows Credential Manager. GitHub's permission also permits source reads, which is accepted for this personal tool to avoid operating a separate authenticated update service.
+Murmur retrieves Tauri-signed artifacts from public GitHub Releases. A token remains supported for authenticated requests, but it is optional for the public repository and is never required to check or download an update.

@@ -1377,7 +1377,7 @@ fn process_dictation_result(
         .repository
         .lock()
         .map_err(|_| CoreError::Unavailable("repository lock is poisoned".into()))?
-        .list_vocabulary()?
+        .dictation_vocabulary()?
         .into_iter()
         .map(|entry| VocabularyReplacement {
             heard: entry.heard,
@@ -2026,7 +2026,7 @@ fn setup_status_with_offline(
         update: UpdateStatusView {
             state: "current",
             version: None,
-            detail: "Automatic private updates check daily when a GitHub token is configured"
+            detail: "Updates check daily and install on the next restart"
                 .into(),
         },
     })
@@ -2324,17 +2324,10 @@ pub fn check_for_updates(state: State<'_, CoreState>) -> CommandResult<SetupStat
 
 pub(crate) fn check_for_updates_inner(state: &CoreState) -> Result<SetupStatusView, CoreError> {
     let mut status = setup_status(state)?;
-    let Some(token) = state.secrets.get("github_updates")? else {
-        status.update = UpdateStatusView {
-            state: "error",
-            version: None,
-            detail: "Private GitHub update access is not configured".into(),
-        };
-        return Ok(status);
-    };
+    let token = state.secrets.get("github_updates")?.unwrap_or_default();
     let client = GitHubUpdateClient::new(
         token,
-        GitHubUpdateConfig::private_repository("hongnhatpham", "murmur-dictation"),
+        GitHubUpdateConfig::public_repository("hongnhatpham", "murmur-dictation"),
     )?;
     match client.check(env!("CARGO_PKG_VERSION"))? {
         Some(update) => {

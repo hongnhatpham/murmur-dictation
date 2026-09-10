@@ -20,6 +20,9 @@ use crate::error::{CoreError, CoreResult};
 
 const GITHUB_API_VERSION: &str = "2022-11-28";
 
+/// The release trust key shared by startup installation and package verification.
+pub const EMBEDDED_UPDATER_PUBLIC_KEY: Option<&str> = option_env!("MURMUR_UPDATER_PUBLIC_KEY");
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum UpdateStatus {
@@ -99,6 +102,15 @@ pub struct GitHubUpdateConfig {
 }
 
 impl GitHubUpdateConfig {
+    pub fn public_repository(owner: impl Into<String>, repository: impl Into<String>) -> Self {
+        Self {
+            owner: owner.into(),
+            repository: repository.into(),
+            platform_key: "windows-x86_64".into(),
+            api_base: "https://api.github.com".into(),
+        }
+    }
+
     pub fn private_repository(owner: impl Into<String>, repository: impl Into<String>) -> Self {
         Self {
             owner: owner.into(),
@@ -362,11 +374,6 @@ pub struct GitHubUpdateClient {
 impl GitHubUpdateClient {
     pub fn new(token: impl Into<String>, config: GitHubUpdateConfig) -> CoreResult<Self> {
         let token = token.into();
-        if token.trim().is_empty() {
-            return Err(CoreError::InvalidInput(
-                "private update credential is empty".into(),
-            ));
-        }
         Ok(Self {
             client: Client::builder()
                 .connect_timeout(StdDuration::from_secs(5))
@@ -512,8 +519,12 @@ impl GitHubUpdateClient {
         &self,
         request: reqwest::blocking::RequestBuilder,
     ) -> reqwest::blocking::RequestBuilder {
+        let request = if self.token.trim().is_empty() {
+            request
+        } else {
+            request.header(AUTHORIZATION, format!("Bearer {}", self.token))
+        };
         request
-            .header(AUTHORIZATION, format!("Bearer {}", self.token))
             .header("X-GitHub-Api-Version", GITHUB_API_VERSION)
             .header(USER_AGENT, concat!("Murmur/", env!("CARGO_PKG_VERSION")))
     }
@@ -524,10 +535,10 @@ impl GitHubUpdateClient {
         }
         let status = response.status();
         let message = match status.as_u16() {
-            401 | 403 => "private update access was denied",
-            404 => "private update release was not found",
+            401 | 403 => "GitHub update access was denied",
+            404 => "GitHub update release was not found",
             429 => "GitHub update quota was exhausted",
-            _ => "private update request failed",
+            _ => "GitHub update request failed",
         };
         Err(CoreError::Unavailable(format!("{message}: HTTP {status}")))
     }
@@ -556,7 +567,7 @@ fn validate_download_url(value: &str) -> CoreResult<()> {
         )
     {
         return Err(CoreError::InvalidInput(
-            "private update URL is not hosted by GitHub".into(),
+            "update URL is not hosted by GitHub".into(),
         ));
     }
     Ok(())
@@ -578,7 +589,7 @@ fn replace_file(source: &Path, destination: &Path) -> CoreResult<()> {
 }
 
 fn network_error(error: reqwest::Error) -> CoreError {
-    CoreError::Unavailable(format!("private update request failed: {error}"))
+    CoreError::Unavailable(format!("GitHub update request failed: {error}"))
 }
 
 fn decode_tauri_base64(value: &str, name: &str) -> CoreResult<String> {
@@ -627,7 +638,7 @@ mod tests {
     }
 
     #[test]
-    fn private_release_check_preserves_signature() {
+    fn public_release_check_does_not_require_token() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
         let base = format!("http://{address}");
@@ -664,7 +675,7 @@ mod tests {
             }
         });
         let client = GitHubUpdateClient::new(
-            "not-a-real-token",
+            "",
             GitHubUpdateConfig {
                 owner: "owner".into(),
                 repository: "repo".into(),
@@ -680,7 +691,7 @@ mod tests {
             .lock()
             .unwrap()
             .iter()
-            .all(|request| request.ends_with("true")));
+            .all(|request| request.ends_with("false")));
     }
 
     const TEST_PUBLIC_KEY: &str = "untrusted comment: minisign public key E7620F1842B4E81F\nRWQf6LRCGA9i53mlYecO4IzT51TGPpvWucNSCh1CBM0QTaLn73Y7GFO3";

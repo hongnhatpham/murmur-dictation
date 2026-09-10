@@ -1,9 +1,13 @@
 [package]
 name = "murmur-core"
-version = "0.2.0"
+version = "0.3.0"
 description = "Native core for Murmur"
 edition = "2021"
 default-run = "murmur"
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
 
 [lib]
 name = "murmur_core"

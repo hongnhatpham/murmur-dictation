@@ -225,7 +225,7 @@ fn has_active_work(state: &CoreState) -> bool {
 
 #[cfg(windows)]
 fn launch_ready_update(data_dir: &std::path::Path) -> Result<bool, Box<dyn Error>> {
-    let Some(public_key) = option_env!("MURMUR_UPDATER_PUBLIC_KEY") else {
+    let Some(public_key) = updates::EMBEDDED_UPDATER_PUBLIC_KEY else {
         return Ok(false);
     };
     let update_directory = data_dir.join("updates");
